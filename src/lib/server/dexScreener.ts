@@ -1,11 +1,11 @@
-import { getAddress, isAddress } from 'viem';
+import { getAddress } from 'viem';
 
 import { getChainMeta } from '@/lib/chainsMeta';
-import type { Address } from '@/lib/types';
+import { addressCacheKey, normalizeSolanaAddress, normalizeTokenAddressForChain } from '@/lib/addresses';
+import type { TokenAddress } from '@/lib/types';
 import { cacheGet, cacheSet } from '@/lib/server/cache';
 import { getCacheSql, isDatabaseConfigured } from '@/lib/server/db';
 
-const ZERO: Address = '0x0000000000000000000000000000000000000000';
 const PRICE_TTL_MS = 30_000;
 const FORCE_MIN_TTL_MS = 10_000;
 
@@ -32,7 +32,7 @@ type DexPair = {
 
 export type TokenPrice = {
   chainId: number;
-  address: Address;
+  address: TokenAddress;
   priceUSD: string | null;
   source: 'dexscreener' | 'neon' | 'memory' | 'none';
   pairAddress?: string;
@@ -41,34 +41,34 @@ export type TokenPrice = {
   cached?: boolean;
 };
 
-function normalizeAddress(address: string): Address | null {
-  if (!isAddress(address, { strict: false })) return null;
-  try {
-    return getAddress(address) as Address;
-  } catch {
-    return null;
-  }
+function normalizeAddress(chainId: number, address: string): TokenAddress | null {
+  return normalizeTokenAddressForChain(chainId, address);
 }
 
-function lookupAddress(chainId: number, address: string): Address {
-  if (address.toLowerCase() === ZERO) {
-    return getAddress(getChainMeta(chainId).wrappedNativeAddress) as Address;
+function lookupAddress(chainId: number, address: string): TokenAddress {
+  const meta = getChainMeta(chainId);
+  if (address.toLowerCase() === meta.nativeTokenAddress.toLowerCase()) {
+    return meta.chainType === 'EVM'
+      ? (getAddress(meta.wrappedNativeAddress) as TokenAddress)
+      : normalizeSolanaAddress(meta.wrappedNativeAddress) || meta.wrappedNativeAddress;
   }
-  return getAddress(address) as Address;
+  return meta.chainType === 'EVM' ? (getAddress(address) as TokenAddress) : normalizeSolanaAddress(address) || address;
 }
 
-function outputAddress(address: string): Address {
-  return (address.toLowerCase() === ZERO ? ZERO : getAddress(address)) as Address;
+function outputAddress(chainId: number, address: string): TokenAddress {
+  const meta = getChainMeta(chainId);
+  if (address.toLowerCase() === meta.nativeTokenAddress.toLowerCase()) return meta.nativeTokenAddress;
+  return meta.chainType === 'EVM' ? (getAddress(address) as TokenAddress) : normalizeSolanaAddress(address) || address;
 }
 
 function cacheKey(chainId: number, address: string) {
-  return `price:${chainId}:${address.toLowerCase()}`;
+  return `price:${chainId}:${addressCacheKey(chainId, address)}`;
 }
 
 function rowToPrice(row: PriceCacheRow, source: 'neon'): TokenPrice {
   return {
     chainId: Number(row.chain_id),
-    address: outputAddress(row.address),
+    address: outputAddress(Number(row.chain_id), row.address),
     priceUSD: row.price_usd,
     pairAddress: row.pair_address || undefined,
     dexId: row.dex_id || undefined,
@@ -86,7 +86,7 @@ async function getDbPrice(chainId: number, address: string, maxAgeMs: number) {
     const rows = (await sql`
       SELECT chain_id, address, price_usd, pair_address, dex_id, liquidity_usd, fetched_at
       FROM token_price_cache
-      WHERE chain_id = ${chainId} AND address = ${address.toLowerCase()}
+      WHERE chain_id = ${chainId} AND address = ${addressCacheKey(chainId, address)}
       LIMIT 1
     `) as PriceCacheRow[];
     const row = rows[0];
@@ -109,7 +109,7 @@ async function upsertDbPrice(price: TokenPrice) {
       )
       VALUES (
         ${price.chainId},
-        ${price.address.toLowerCase()},
+        ${addressCacheKey(price.chainId, String(price.address))},
         ${price.priceUSD},
         ${price.pairAddress || null},
         ${price.dexId || null},
@@ -197,17 +197,17 @@ async function fetchDexPairs(chainSlug: string, addresses: string[]) {
 }
 
 export async function getTokenPrices(
-  tokens: Array<{ chainId: number; address: Address }>,
+  tokens: Array<{ chainId: number; address: string }>,
   options: { force?: boolean } = {}
 ): Promise<TokenPrice[]> {
-  const deduped = new Map<string, { chainId: number; address: Address; lookup: Address }>();
+  const deduped = new Map<string, { chainId: number; address: TokenAddress; lookup: TokenAddress }>();
 
   for (const token of tokens) {
-    const normalized = normalizeAddress(token.address);
+    const normalized = normalizeAddress(token.chainId, token.address);
     if (!normalized) continue;
-    const address = outputAddress(normalized);
+    const address = outputAddress(token.chainId, normalized);
     const lookup = lookupAddress(token.chainId, normalized);
-    deduped.set(`${token.chainId}:${address.toLowerCase()}`, {
+    deduped.set(`${token.chainId}:${addressCacheKey(token.chainId, String(address))}`, {
       chainId: token.chainId,
       address,
       lookup,
@@ -215,7 +215,7 @@ export async function getTokenPrices(
   }
 
   const output = new Map<string, TokenPrice>();
-  const misses: Array<{ chainId: number; address: Address; lookup: Address }> = [];
+  const misses: Array<{ chainId: number; address: TokenAddress; lookup: TokenAddress }> = [];
   const cacheMaxAge = options.force ? FORCE_MIN_TTL_MS : PRICE_TTL_MS;
 
   for (const token of deduped.values()) {
@@ -236,7 +236,7 @@ export async function getTokenPrices(
     misses.push(token);
   }
 
-  const missesByChain = new Map<number, Array<{ chainId: number; address: Address; lookup: Address }>>();
+  const missesByChain = new Map<number, Array<{ chainId: number; address: TokenAddress; lookup: TokenAddress }>>();
   for (const miss of misses) {
     const list = missesByChain.get(miss.chainId) || [];
     list.push(miss);
