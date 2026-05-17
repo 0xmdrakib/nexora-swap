@@ -4,13 +4,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import { useAccount } from 'wagmi';
-import { getAddress, isAddress } from 'viem';
 
-import type { Address, Token } from '@/lib/types';
-import { CHAIN_META } from '@/lib/chainsMeta';
+import type { Token } from '@/lib/types';
+import { CHAIN_META, isSolanaChain } from '@/lib/chainsMeta';
+import { addressCacheKey, isNativeTokenAddressForChain, normalizeTokenAddressForChain } from '@/lib/addresses';
 import { formatTokenAmount } from '@/lib/format';
 import { balanceKey, useTokenBalances } from '@/lib/hooks/useTokenBalances';
 import { useTokenList } from '@/lib/hooks/useTokenList';
+import { useSolanaWallet } from '@/lib/hooks/useSolanaWallet';
 
 type Props = {
   label?: string;
@@ -39,16 +40,8 @@ function normalizeAddr(addr?: string | null) {
   return (addr || '').toLowerCase();
 }
 
-function isZeroAddress(addr: string) {
-  return normalizeAddr(addr) === '0x0000000000000000000000000000000000000000';
-}
-
-function toSafeAddress(addr?: string | null): Address | null {
-  if (!addr) return null;
-  // Many upstream APIs return lowercase/non-checksummed addresses.
-  // Validate loosely, then checksum so it satisfies our `Address` type.
-  if (!isAddress(addr, { strict: false })) return null;
-  return getAddress(addr) as Address;
+function tokenKey(chainId: number, addr?: string | null) {
+  return addressCacheKey(chainId, addr || '');
 }
 
 function ChainIcon({ chainId, size = 18 }: { chainId: number; size?: number }) {
@@ -74,7 +67,7 @@ function TokenLogo({ token, chainId, size = 28, fallback }: { token: Token; chai
   const [broken, setBroken] = useState(false);
 
   const logo =
-    isZeroAddress(token.address) ? CHAIN_META[chainId]?.logoUrl : token.logoURI;
+    isNativeTokenAddressForChain(chainId, token.address) ? CHAIN_META[chainId]?.logoUrl : token.logoURI;
 
   if (!logo || broken) {
     const letter = (fallback || token.symbol || '?').slice(0, 1).toUpperCase();
@@ -148,7 +141,9 @@ export default function TokenSelect({
   disabled = false,
 }: Props) {
   const { address } = useAccount();
+  const solanaWallet = useSolanaWallet();
   const { tokens, loading, error, addCustomToken } = useTokenList(chainId);
+  const walletAddress = isSolanaChain(chainId) ? solanaWallet.publicKey : address;
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -201,14 +196,14 @@ export default function TokenSelect({
     let alive = true;
     async function loadWalletTokens() {
       if (!open) return;
-      if (!address) {
+      if (!walletAddress) {
         setWalletTokens([]);
         setNativeBalanceRaw(null);
         return;
       }
       setWalletLoading(true);
       try {
-        const res = await fetch(`/api/wallet-tokens?chainId=${chainId}&address=${address}`);
+        const res = await fetch(`/api/wallet-tokens?chainId=${chainId}&address=${walletAddress}`);
         if (!res.ok) throw new Error(await res.text());
         const json = await res.json();
         if (!alive) return;
@@ -226,12 +221,12 @@ export default function TokenSelect({
     return () => {
       alive = false;
     };
-  }, [open, address, chainId]);
+  }, [open, walletAddress, chainId]);
 
   const walletByAddr = useMemo(() => {
     const map = new Map<string, WalletToken>();
     for (const wt of walletTokens) {
-      map.set(normalizeAddr(wt.token_address), wt);
+      map.set(tokenKey(chainId, wt.token_address), wt);
     }
     return map;
   }, [walletTokens]);
@@ -247,7 +242,7 @@ export default function TokenSelect({
         }
       })
 			.flatMap((wt) => {
-				const addr = toSafeAddress(wt.token_address);
+				const addr = normalizeTokenAddressForChain(chainId, wt.token_address);
 				if (!addr) return [];
 				return [
 					({
@@ -268,22 +263,23 @@ export default function TokenSelect({
   const popularTokens = useMemo(() => {
     const list: Token[] = [];
     // include native token (already present in /api/tokens results usually)
-    const native = tokens.find((t) => isZeroAddress(t.address));
+    const native = tokens.find((t) => isNativeTokenAddressForChain(chainId, t.address));
     if (native) list.push(native);
 
-    for (const sym of POPULAR_SYMBOLS) {
+  for (const sym of POPULAR_SYMBOLS) {
       const t = tokens.find((x) => x.symbol?.toUpperCase() === sym);
-      if (t && !list.some((a) => normalizeAddr(a.address) === normalizeAddr(t.address))) list.push(t);
+      if (t && !list.some((a) => tokenKey(a.chainId || chainId, a.address) === tokenKey(t.chainId || chainId, t.address))) list.push(t);
     }
 
     // fallback: if /api/tokens doesn't include native, create one
     if (!native) {
+      const meta = CHAIN_META[chainId];
       list.unshift({
         chainId,
-        address: '0x0000000000000000000000000000000000000000',
-        symbol: CHAIN_META[chainId]?.nativeSymbol || 'NATIVE',
-        name: CHAIN_META[chainId]?.name ? `${CHAIN_META[chainId].name} Native` : 'Native Token',
-        decimals: 18,
+        address: meta?.nativeTokenAddress || '0x0000000000000000000000000000000000000000',
+        symbol: meta?.nativeSymbol || 'NATIVE',
+        name: meta?.name ? `${meta.name} Native` : 'Native Token',
+        decimals: meta?.nativeDecimals || 18,
         logoURI: undefined,
       });
     }
@@ -293,16 +289,16 @@ export default function TokenSelect({
 
   const remainderTokens = useMemo(() => {
     const seen = new Set<string>();
-    for (const t of popularTokens) seen.add(normalizeAddr(t.address));
-    for (const t of walletTokensNonZero) seen.add(normalizeAddr(t.address));
-    return tokens.filter((t) => !seen.has(normalizeAddr(t.address)));
+    for (const t of popularTokens) seen.add(tokenKey(t.chainId || chainId, t.address));
+    for (const t of walletTokensNonZero) seen.add(tokenKey(t.chainId || chainId, t.address));
+    return tokens.filter((t) => !seen.has(tokenKey(t.chainId || chainId, t.address)));
   }, [tokens, popularTokens, walletTokensNonZero]);
 
   const allTokensForSearch = useMemo(() => {
     const merged: Token[] = [];
     const push = (t: Token) => {
-      const key = normalizeAddr(t.address);
-      if (!key || merged.some((x) => normalizeAddr(x.address) === key)) return;
+      const key = tokenKey(t.chainId || chainId, t.address);
+      if (!key || merged.some((x) => tokenKey(x.chainId || chainId, x.address) === key)) return;
       merged.push(t);
     };
     popularTokens.forEach(push);
@@ -312,7 +308,7 @@ export default function TokenSelect({
   }, [popularTokens, walletTokensNonZero, tokens]);
 
   const { balances: exactBalances } = useTokenBalances(
-    address as Address | undefined,
+    walletAddress || undefined,
     open ? popularTokens : []
   );
 
@@ -331,10 +327,10 @@ export default function TokenSelect({
   }, [query, allTokensForSearch]);
 
   function getBalanceText(t: Token) {
-    if (isZeroAddress(t.address)) {
+    if (isNativeTokenAddressForChain(chainId, t.address)) {
       if (walletLoading) return '-';
       if (!nativeBalanceRaw) return '-';
-      return formatTokenAmount(nativeBalanceRaw, 18);
+      return formatTokenAmount(nativeBalanceRaw, CHAIN_META[chainId]?.nativeDecimals || 18);
     }
     const exactRaw = exactBalances[balanceKey(t.chainId || chainId, t.address)];
     if (exactRaw !== undefined) {
@@ -344,14 +340,14 @@ export default function TokenSelect({
         // Fall back to wallet scan data below.
       }
     }
-    const wt = walletByAddr.get(normalizeAddr(t.address));
+    const wt = walletByAddr.get(tokenKey(t.chainId || chainId, t.address));
     if (!wt) return '-';
     return formatTokenAmount(wt.balance || '0', wt.decimals || 18);
   }
 
   async function resolveSelectedToken(t: Token): Promise<Token> {
     const clean = { ...t, priceUSD: undefined, balanceUsd: undefined };
-    if (isZeroAddress(t.address)) return clean;
+    if (isNativeTokenAddressForChain(chainId, t.address)) return clean;
 
     const res = await fetch(`/api/token-metadata?chainId=${chainId}&address=${encodeURIComponent(t.address)}`, {
       cache: 'no-store',
@@ -378,14 +374,15 @@ export default function TokenSelect({
   async function handleAddCustom() {
     setCustomError(null);
     const addr = customAddr.trim();
-    if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
-      setCustomError('Please paste a valid 0x... token contract address.');
+    const normalized = normalizeTokenAddressForChain(chainId, addr);
+    if (!normalized) {
+      setCustomError(`Please paste a valid ${CHAIN_META[chainId]?.name || 'chain'} token address.`);
       return;
     }
 
     setAddingCustom(true);
     try {
-      await addCustomToken(addr);
+      await addCustomToken(normalized);
       setCustomAddr('');
     } catch (e: any) {
       setCustomError(e?.message || 'Failed to add this token on the selected chain.');
@@ -510,7 +507,7 @@ export default function TokenSelect({
                 <input
                   value={customAddr}
                   onChange={(e) => setCustomAddr(e.target.value)}
-                  placeholder="0x..."
+                    placeholder={isSolanaChain(chainId) ? 'Solana mint address' : '0x...'}
                   className="ui-input"
                 />
                 <button
