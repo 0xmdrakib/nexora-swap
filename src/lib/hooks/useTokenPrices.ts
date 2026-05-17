@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Token } from '@/lib/types';
+import { addressCacheKey } from '@/lib/addresses';
 
 const PRICE_REFRESH_MS = 30_000;
 const ACTIVE_WINDOW_MS = 5 * 60_000;
 const MAX_POLLS = 10;
 
 function keyFor(chainId: number, address: string) {
-  return `${chainId}:${address.toLowerCase()}`;
+  return `${chainId}:${addressCacheKey(chainId, address)}`;
 }
 
 export function tokenPriceKey(token: Token | null | undefined, fallbackChainId?: number) {
@@ -27,7 +28,7 @@ export function useTokenPrices(
   const lastRefreshSignal = useRef(options.refreshSignal || 0);
 
   const tokensKey = tokens
-    .map((token) => (token?.chainId && token.address ? `${token.chainId}:${token.address.toLowerCase()}` : ''))
+    .map((token) => (token?.chainId && token.address ? keyFor(token.chainId, token.address) : ''))
     .filter(Boolean)
     .join('|');
 
@@ -47,7 +48,7 @@ export function useTokenPrices(
   }, [tokensKey]);
 
   const itemsKey = useMemo(
-    () => priceItems.map((item) => `${item.chainId}:${item.address.toLowerCase()}`).join('|'),
+    () => priceItems.map((item) => keyFor(item.chainId, item.address)).join('|'),
     [priceItems]
   );
 
