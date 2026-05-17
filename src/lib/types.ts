@@ -1,8 +1,9 @@
 export type Address = `0x${string}`;
+export type TokenAddress = Address | string;
 
 export type Token = {
   chainId: number;
-  address: Address; // 0x000.. for native token
+  address: TokenAddress; // EVM 0x..., Solana base58; native token uses chain-specific canonical address
   symbol: string;
   name: string;
   decimals: number;
@@ -32,17 +33,18 @@ export type QuoteRequest = {
   fromToken: Token;
   toToken: Token;
   fromAmount: string; // raw (wei)
-  fromAddress: Address;
-  toAddress: Address;
+  fromAddress: string;
+  toAddress: string;
   slippage: number; // 0.0001 .. 0.2
 };
 
 export type TxRequest = {
-  from?: Address;
-  to: Address;
-  data?: Address | string;
+  from?: string;
+  to?: string;
+  data?: string;
   value?: string; // hex or decimal string
   chainId: number;
+  txType?: 'evm' | 'solana';
 };
 
 export type QuoteResponse = {
@@ -52,7 +54,7 @@ export type QuoteResponse = {
     fromAmount: string;
     toAmount: string;
     toAmountMin?: string;
-    approvalAddress?: Address;
+    approvalAddress?: string;
     gasUSD?: string;
     routes?: Array<{ name: string; part: number }>;
   };
