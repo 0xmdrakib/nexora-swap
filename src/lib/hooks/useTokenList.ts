@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { Token } from '@/lib/types';
+import { addressCacheKey, normalizeTokenAddressForChain } from '@/lib/addresses';
 
 const LS_KEY = 'swapdex:customTokens:v1';
 
@@ -89,7 +90,7 @@ export function useTokenList(chainId?: number) {
     const list = [...remote, ...custom.filter((t) => t.chainId === chainId)];
     const map = new Map<string, Token>();
     for (const t of list) {
-      const k = `${t.chainId}:${t.address.toLowerCase()}`;
+      const k = `${t.chainId}:${addressCacheKey(t.chainId, t.address)}`;
       if (!map.has(k)) map.set(k, t);
     }
     return Array.from(map.values());
@@ -97,8 +98,8 @@ export function useTokenList(chainId?: number) {
 
   async function addCustomToken(address: string) {
     if (!chainId) throw new Error('Missing chainId');
-    const addr = (address || '').trim();
-    if (!addr.toLowerCase().startsWith('0x') || addr.length !== 42) throw new Error('Invalid token address');
+    const addr = normalizeTokenAddressForChain(chainId, address);
+    if (!addr) throw new Error('Invalid token address');
 
     // Fetch metadata (Moralis → on-chain fallback) from the server route.
     const res = await fetch(`/api/token-metadata?chainId=${chainId}&address=${addr}`, { cache: 'no-store' });
@@ -119,9 +120,9 @@ export function useTokenList(chainId?: number) {
 
     setCustom((prev) => {
       const next = [...prev];
-      const k = `${t.chainId}:${t.address.toLowerCase()}`;
-      const exists = next.some((x) => `${x.chainId}:${x.address.toLowerCase()}` === k);
-      const filtered = exists ? next.filter((x) => `${x.chainId}:${x.address.toLowerCase()}` !== k) : next;
+      const k = `${t.chainId}:${addressCacheKey(t.chainId, t.address)}`;
+      const exists = next.some((x) => `${x.chainId}:${addressCacheKey(x.chainId, x.address)}` === k);
+      const filtered = exists ? next.filter((x) => `${x.chainId}:${addressCacheKey(x.chainId, x.address)}` !== k) : next;
       const out = [t, ...filtered];
       writeCustomTokens(out);
       return out;
