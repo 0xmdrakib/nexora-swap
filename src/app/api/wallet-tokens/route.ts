@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAddress, isAddress } from 'viem';
 
 import { getAlchemyTokenBalances, getNativeBalance } from '@/lib/server/alchemy';
+import { getSolanaWalletTokens } from '@/lib/server/solana';
 import { cacheGet, cacheSet } from '@/lib/server/cache';
 import { getTokenMetadata } from '@/lib/server/tokenMetadata';
+import { getChainMeta, isSolanaChain } from '@/lib/chainsMeta';
 import { formatTokenAmount } from '@/lib/format';
+import { normalizeWalletAddressForChain, toChecksumAddress } from '@/lib/addresses';
 import type { Address } from '@/lib/types';
 
 export type WalletToken = {
@@ -19,12 +21,7 @@ export type WalletToken = {
 };
 
 function toAddress(value: string): Address | null {
-  if (!isAddress(value, { strict: false })) return null;
-  try {
-    return getAddress(value) as Address;
-  } catch {
-    return null;
-  }
+  return toChecksumAddress(value);
 }
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -45,21 +42,57 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const chainId = Number(searchParams.get('chainId'));
-  const wallet = toAddress((searchParams.get('address') || '').trim());
+  const walletRaw = (searchParams.get('address') || '').trim();
   const limit = Math.min(Math.max(Number(searchParams.get('limit') || '100'), 1), 100);
 
-  if (!chainId || !wallet) {
-    return NextResponse.json({ error: 'chainId and valid address are required' }, { status: 400 });
+  if (!chainId || !walletRaw) {
+    return NextResponse.json({ error: 'chainId and address are required' }, { status: 400 });
   }
+  const meta = getChainMeta(chainId);
+  const wallet = meta.chainType === 'EVM' ? toAddress(walletRaw) : normalizeWalletAddressForChain(chainId, walletRaw);
+  if (!wallet) return NextResponse.json({ error: 'chainId and valid address are required' }, { status: 400 });
 
   const cacheKey = `walletTokens:alchemy:${chainId}:${wallet.toLowerCase()}:${limit}`;
   const cached = cacheGet<any>(cacheKey);
   if (cached) return NextResponse.json(cached);
 
   try {
+    if (isSolanaChain(chainId)) {
+      const solana = await getSolanaWalletTokens(wallet, limit);
+      const resolved = await mapLimit(solana.tokenAccounts, 8, async (account) => {
+        try {
+          const metadata = await getTokenMetadata(chainId, account.mint);
+          const token = metadata.token;
+          return {
+            token_address: String(token.address),
+            name: token.name,
+            symbol: token.symbol,
+            decimals: token.decimals,
+            balance: account.balance.toString(),
+            balanceFormatted: formatTokenAmount(account.balance.toString(), token.decimals || account.decimals || 0, 6),
+            logo: token.logoURI || null,
+            thumbnail: null,
+          } satisfies WalletToken;
+        } catch {
+          return null;
+        }
+      });
+
+      const payload = {
+        nativeBalance: {
+          balance: solana.nativeBalance.balance,
+          balanceFormatted: formatTokenAmount(solana.nativeBalance.balance || '0', meta.nativeDecimals, 6),
+        },
+        tokens: resolved.filter(Boolean),
+        source: 'solana-rpc',
+      };
+      cacheSet(cacheKey, payload, 30_000);
+      return NextResponse.json(payload);
+    }
+
     const [nativeBalance, tokenBalances] = await Promise.all([
-      getNativeBalance(chainId, wallet),
-      getAlchemyTokenBalances(chainId, wallet),
+      getNativeBalance(chainId, wallet as Address),
+      getAlchemyTokenBalances(chainId, wallet as Address),
     ]);
 
     const nonZero = tokenBalances
