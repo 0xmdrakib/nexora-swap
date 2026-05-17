@@ -4,7 +4,10 @@ import { arbitrum, avalanche, base, bsc, mainnet, optimism, polygon } from 'wagm
 
 export const SUPPORTED_CHAINS = [mainnet, polygon, arbitrum, optimism, base, bsc, avalanche] as const;
 
-const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || '';
+const projectId =
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
+  // Build-safe placeholder. WalletConnect wallets still require a real project id in production.
+  '00000000000000000000000000000000';
 
 function rpcUrl(chainId: number) {
   return (
