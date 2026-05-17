@@ -3,6 +3,8 @@ import { formatUnits, parseUnits, getAddress, isAddress } from 'viem';
 import type { QuoteErrorReason, QuoteRequest, QuoteResponse, RouterId } from '@/lib/types';
 import { getCachedMinAmountHint } from '@/lib/server/minAmount';
 import { cacheGet, cacheSet } from '@/lib/server/cache';
+import { getChainMeta, isEvmChain } from '@/lib/chainsMeta';
+import { normalizeWalletAddressForChain } from '@/lib/addresses';
 
 const LIFI_BASE = process.env.LIFI_BASE_URL || 'https://li.quest';
 const INTEGRATOR = process.env.LIFI_INTEGRATOR || 'swapdex-starter';
@@ -31,6 +33,27 @@ function toOneInchTokenAddress(addr: string): string {
   if (a.toLowerCase() === ZERO_ADDRESS) return ONEINCH_NATIVE;
   if (a.toLowerCase() === ONEINCH_NATIVE.toLowerCase()) return ONEINCH_NATIVE;
   return a;
+}
+
+function isOneInchSupportedForBody(body: QuoteRequest) {
+  return body.fromChainId === body.toChainId && isEvmChain(body.fromChainId);
+}
+
+function validateQuoteAddresses(body: QuoteRequest): string | null {
+  try {
+    getChainMeta(body.fromChainId);
+    getChainMeta(body.toChainId);
+  } catch {
+    return 'Unsupported chain id';
+  }
+
+  if (!normalizeWalletAddressForChain(body.fromChainId, body.fromAddress)) {
+    return `Invalid ${getChainMeta(body.fromChainId).name} from address`;
+  }
+  if (!normalizeWalletAddressForChain(body.toChainId, body.toAddress)) {
+    return `Invalid ${getChainMeta(body.toChainId).name} recipient address`;
+  }
+  return null;
 }
 
 type QuoteApiError = Error & { status?: number; payload?: any | null; text?: string };
@@ -433,7 +456,7 @@ async function oneInchQuoteOk(
   fromAmount: bigint,
   timeoutMs = 2500,
 ): Promise<boolean> {
-  if (body.fromChainId !== body.toChainId) return false;
+  if (!isOneInchSupportedForBody(body)) return false;
 
   const bases = getOneInchBaseCandidates();
   const chainId = body.fromChainId;
@@ -506,8 +529,8 @@ async function lifiQuoteOk(
 
 async function oneInchQuote(body: QuoteRequest): Promise<QuoteResponse> {
   // 1inch is same-chain only.
-  if (body.fromChainId !== body.toChainId) {
-    throw new Error('1inch direct route only supports same-chain swaps. Switch to LiFi for cross-chain.');
+  if (!isOneInchSupportedForBody(body)) {
+    throw new Error('1inch Direct only supports same-chain EVM swaps. Use LiFi for Solana or cross-chain routes.');
   }
 
   const bases = getOneInchBaseCandidates();
@@ -705,7 +728,10 @@ export async function POST(req: Request) {
   // - Auto (Option B): cross-chain => LiFi, same-chain => 1inch (fallback to LiFi if 1inch errors)
   // In auto mode we still probe 1inch even without a Business key, because
   // the public host (api.1inch.io) can return quotes/swaps for many chains.
-  if (body.router === 'auto' && body.fromChainId === body.toChainId) {
+  const addressError = validateQuoteAddresses(body);
+  if (addressError) return NextResponse.json({ error: addressError, reason: 'OTHER' }, { status: 400 });
+
+  if (body.router === 'auto' && isOneInchSupportedForBody(body)) {
     try {
       const out = await oneInchQuote({ ...body, router: 'oneinch-direct' });
       return NextResponse.json(out);
@@ -714,6 +740,12 @@ export async function POST(req: Request) {
     }
   }
   if (body.router === 'oneinch-direct') {
+    if (!isOneInchSupportedForBody(body)) {
+      return NextResponse.json(
+        { error: '1inch Direct only supports same-chain EVM swaps. Use LiFi for Solana or cross-chain routes.', reason: 'OTHER' },
+        { status: 400 },
+      );
+    }
     try {
       const out = await oneInchQuote(body);
       return NextResponse.json(out);
@@ -798,7 +830,7 @@ export async function POST(req: Request) {
   // - gaszip: force gasZipBridge as the bridge for cross-chain
   // - lifi-<dex>: force that DEX on LiFi (if supported)
   let allowExchanges: string | null =
-    String(router).startsWith('lifi-') && router !== 'lifi-smart' ? tool : null;
+    String(router).startsWith('lifi-') && router !== 'lifi-smart' && isEvmChain(body.fromChainId) ? tool : null;
 
   const allowBridges = router === 'gaszip' ? 'gasZipBridge' : null;
 
@@ -866,10 +898,12 @@ export async function POST(req: Request) {
     const protocols = step?.estimate?.data?.protocols;
     const routes = protocols ? flattenProtocols(protocols) : [];
 
-	    const txTo = step?.transactionRequest ? toSafeAddress(step.transactionRequest.to) : undefined;
-	    if (step?.transactionRequest && !txTo) {
-	      return NextResponse.json({ error: 'LI.FI returned an invalid transaction target address.' }, { status: 502 });
-	    }
+    const txChainId = Number(step?.transactionRequest?.chainId || body.fromChainId);
+    const isEvmTx = step?.transactionRequest && isEvmChain(txChainId);
+    const txTo = isEvmTx ? toSafeAddress(step.transactionRequest.to) : undefined;
+    if (isEvmTx && !txTo) {
+      return NextResponse.json({ error: 'LI.FI returned an invalid transaction target address.' }, { status: 502 });
+    }
 
     const out: QuoteResponse = {
       router: body.router,
@@ -878,14 +912,15 @@ export async function POST(req: Request) {
         fromAmount: String(step?.estimate?.fromAmount || body.fromAmount),
         toAmount: String(step?.estimate?.toAmount || '0'),
         toAmountMin: step?.estimate?.toAmountMin ? String(step.estimate.toAmountMin) : undefined,
-	        approvalAddress: toSafeAddress(step?.estimate?.approvalAddress),
+        approvalAddress: isEvmTx ? toSafeAddress(step?.estimate?.approvalAddress) : undefined,
         gasUSD: gasUsdFromLiFi(step),
         routes,
       },
-	      tx: step?.transactionRequest && txTo
+      tx: step?.transactionRequest
         ? {
-            chainId: Number(step.transactionRequest.chainId || body.fromChainId),
-	            to: txTo,
+            chainId: txChainId,
+            txType: isEvmTx ? 'evm' : 'solana',
+            to: isEvmTx ? txTo : step.transactionRequest.to ? String(step.transactionRequest.to) : undefined,
             data: step.transactionRequest.data ? String(step.transactionRequest.data) : undefined,
             value: step.transactionRequest.value ? String(step.transactionRequest.value) : undefined,
           }
