@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getTokenPrices } from '@/lib/server/dexScreener';
-
-const ZERO = '0x0000000000000000000000000000000000000000' as const;
+import { getChainMeta } from '@/lib/chainsMeta';
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
@@ -14,7 +13,8 @@ export async function GET(req: Request) {
   }
 
   try {
-    const [price] = await getTokenPrices([{ chainId, address: ZERO }], { force });
+    const meta = getChainMeta(chainId);
+    const [price] = await getTokenPrices([{ chainId, address: meta.nativeTokenAddress }], { force });
     const usd = Number(price?.priceUSD || 0);
     if (!Number.isFinite(usd) || usd <= 0) {
       return NextResponse.json(
