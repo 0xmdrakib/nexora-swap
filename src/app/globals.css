@@ -386,6 +386,15 @@ input:focus-visible {
   z-index: 30;
 }
 
+.wallet-stack {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
 .control-button,
 .network-button,
 .token-trigger {
@@ -1139,6 +1148,11 @@ input:focus-visible {
     flex: 1 1 0;
     min-width: 0;
     max-width: none;
+  }
+
+  .wallet-stack {
+    flex: 1 1 0;
+    justify-content: stretch;
   }
 
   .network-shell {
