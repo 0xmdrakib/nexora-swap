@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { getTokenPrices } from '@/lib/server/dexScreener';
+import { normalizeTokenAddressForChain } from '@/lib/addresses';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,11 +10,12 @@ export async function POST(req: NextRequest) {
     const force = Boolean(body?.force);
 
     const normalized = tokens
-      .map((token: any) => ({
-        chainId: Number(token?.chainId),
-        address: String(token?.address || '').trim() as `0x${string}`,
-      }))
-      .filter((token: any) => token.chainId && token.address.startsWith('0x'))
+      .map((token: any) => {
+        const chainId = Number(token?.chainId);
+        const address = chainId ? normalizeTokenAddressForChain(chainId, String(token?.address || '')) : null;
+        return address ? { chainId, address } : null;
+      })
+      .filter(Boolean)
       .slice(0, 20);
 
     if (!normalized.length) {
