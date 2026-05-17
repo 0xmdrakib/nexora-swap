@@ -20,23 +20,24 @@ import clsx from 'clsx';
 import type { Address, QuoteRequest, RouterId, Token } from '@/lib/types';
 import { ERC20_ABI } from '@/lib/erc20';
 import { formatHash, formatTokenAmount, formatUSD, safeParseFloat } from '@/lib/format';
-import { getChainMeta } from '@/lib/chainsMeta';
+import { getChainMeta, isEvmChain, isSolanaChain } from '@/lib/chainsMeta';
+import { isNativeTokenAddressForChain, nativeTokenAddressForChain } from '@/lib/addresses';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useQuote } from '@/lib/hooks/useQuote';
-import { balanceKey, useTokenBalances } from '@/lib/hooks/useTokenBalances';
+import { balanceKey, useMultiWalletTokenBalances } from '@/lib/hooks/useTokenBalances';
 import { tokenPriceKey, useTokenPrices } from '@/lib/hooks/useTokenPrices';
+import { useSolanaWallet } from '@/lib/hooks/useSolanaWallet';
 import {
   buildSwapPairPath,
   isNativeTokenAddress,
-  NATIVE_TOKEN_ADDRESS,
   parseSwapPairPath,
   type SwapPairUrl,
 } from '@/lib/swapUrl';
 import TokenSelect from './TokenSelect';
 import ChainSelect from './ChainSelect';
+import SolanaConnectButton from './SolanaConnectButton';
 import { Select } from './ui/Select';
 
-const ZERO: Address = '0x0000000000000000000000000000000000000000';
 
 function aggregatorName(router: RouterId) {
   const r = String(router);
@@ -116,7 +117,7 @@ function minNativeReserve(chainId: number): string {
   }
 }
 
-async function loadSharedToken(chainId: number, address: Address): Promise<Token> {
+async function loadSharedToken(chainId: number, address: string): Promise<Token> {
   if (isNativeTokenAddress(address)) {
     try {
       const res = await fetch(`/api/tokens?chainId=${chainId}&nativeOnly=1`, { cache: 'no-store' });
@@ -129,10 +130,10 @@ async function loadSharedToken(chainId: number, address: Address): Promise<Token
     const meta = getChainMeta(chainId);
     return {
       chainId,
-      address: NATIVE_TOKEN_ADDRESS,
+      address: nativeTokenAddressForChain(chainId),
       symbol: meta.nativeSymbol,
       name: meta.nativeSymbol,
-      decimals: 18,
+      decimals: meta.nativeDecimals,
       logoURI: meta.logoUrl,
     };
   }
@@ -163,15 +164,21 @@ export default function SwapCard() {
   const { address, isConnected } = useAccount();
   const walletChainId = useChainId();
   const { chains, switchChainAsync } = useSwitchChain();
+  const solanaWallet = useSolanaWallet();
 
   const [fromChainId, setFromChainId] = useState<number>(walletChainId);
   const [fromChainManual, setFromChainManual] = useState(false);
   const [fromToken, setFromToken] = useState<Token | null>(null);
   const chainId = fromChainId;
+  const fromChainIsSolana = isSolanaChain(chainId);
+  const fromChainIsEvm = isEvmChain(chainId);
 
   const [toChainId, setToChainId] = useState<number>(walletChainId);
   const [toChainManual, setToChainManual] = useState(false);
   const [toToken, setToToken] = useState<Token | null>(null);
+  const toChainIsSolana = isSolanaChain(toChainId);
+  const toChainIsEvm = isEvmChain(toChainId);
+  const needsDualWallets = (fromChainIsEvm && toChainIsSolana) || (fromChainIsSolana && toChainIsEvm);
 
   const [amountUI, setAmountUI] = useState('');
   const debouncedAmountUI = useDebounce(amountUI, 350);
@@ -194,6 +201,7 @@ export default function SwapCard() {
   const [balanceNonce, setBalanceNonce] = useState(0);
   const [shareHydrating, setShareHydrating] = useState(false);
   const [shareHydrationError, setShareHydrationError] = useState<string | null>(null);
+  const [solanaNativeReserveLamports, setSolanaNativeReserveLamports] = useState<bigint>(20_000n);
 
   const sharedPairFromPath = useMemo(() => parseSwapPairPath(pathname), [pathname]);
 
@@ -346,10 +354,13 @@ export default function SwapCard() {
   }, [debouncedAmountUI, fromToken]);
 
   // Live balance for the "from" token (used to show instant "insufficient balance" UX).
-  const fromIsNative = fromToken?.address === ZERO;
+  const fromIsNative = fromToken ? isNativeTokenAddressForChain(chainId, fromToken.address) : false;
   const { prices } = useTokenPrices([fromToken, toToken], { refreshSignal: balanceNonce });
-  const { balances: selectedBalances, loading: selectedBalancesLoading } = useTokenBalances(
-    address as Address | undefined,
+  const { balances: selectedBalances, loading: selectedBalancesLoading } = useMultiWalletTokenBalances(
+    {
+      evm: address as string | undefined,
+      solana: solanaWallet.publicKey || undefined,
+    },
     [fromToken, toToken],
     { refreshSignal: balanceNonce }
   );
@@ -413,26 +424,29 @@ export default function SwapCard() {
 
     // gas.zip is cross-chain only; if user switches back to same-chain, fall back.
     if (!isCrossChain && router === 'gaszip') setRouter('auto');
-  }, [isCrossChain, router]);
+    if (!fromChainIsEvm && (router === 'auto' || router === 'oneinch-direct')) setRouter('lifi-smart');
+  }, [isCrossChain, router, fromChainIsEvm]);
 
   const routeOptions = useMemo(() => {
     // Always show all routes, but disable ones that don't apply.
     // This keeps the menu consistent and avoids "where did my option go?" confusion.
     return [
-      { value: 'auto', label: 'Auto (best)', disabled: isCrossChain },
+      { value: 'auto', label: 'Auto (best)', disabled: isCrossChain || !fromChainIsEvm },
       { value: 'lifi-smart', label: 'LiFi Smart Routing' },
-      { value: 'oneinch-direct', label: '1inch Direct (same-chain)', disabled: isCrossChain },
+      { value: 'oneinch-direct', label: '1inch Direct (same-chain)', disabled: isCrossChain || !fromChainIsEvm },
       { value: 'gaszip', label: 'gas.zip (cross-chain only)', disabled: !isCrossChain },
     ];
-  }, [isCrossChain]);
+  }, [isCrossChain, fromChainIsEvm]);
 
   // Auto routing strategy (production-realistic):
   // - Cross-chain => LiFi only
   // - Same-chain + Auto => compare 1inch vs LiFi and pick the better quote (fallback gracefully)
-  const autoEnabled = router === 'auto' && !isCrossChain;
+  const autoEnabled = router === 'auto' && !isCrossChain && fromChainIsEvm;
 
   const quoteReqCommon = useMemo(() => {
-    if (!isConnected || !address) return null;
+    const fromAddress = fromChainIsSolana ? solanaWallet.publicKey : address;
+    const toAddress = toChainIsSolana ? solanaWallet.publicKey : address;
+    if (!fromAddress || !toAddress) return null;
     if (!fromTokenForQuote || !toTokenForQuote) return null;
     if (!fromAmountRaw || fromAmountRaw === '0') return null;
 
@@ -442,11 +456,22 @@ export default function SwapCard() {
       fromToken: fromTokenForQuote,
       toToken: toTokenForQuote,
       fromAmount: fromAmountRaw,
-      fromAddress: address as Address,
-      toAddress: address as Address,
+      fromAddress,
+      toAddress,
       slippage,
     };
-  }, [isConnected, address, fromTokenForQuote, toTokenForQuote, fromAmountRaw, chainId, toChainId, slippage]);
+  }, [
+    fromChainIsSolana,
+    toChainIsSolana,
+    solanaWallet.publicKey,
+    address,
+    fromTokenForQuote,
+    toTokenForQuote,
+    fromAmountRaw,
+    chainId,
+    toChainId,
+    slippage,
+  ]);
 
   const quoteReqOneInch: QuoteRequest | undefined = useMemo(() => {
     if (isCrossChain) return undefined;
@@ -494,9 +519,10 @@ export default function SwapCard() {
 
   const effectiveRouter: RouterId = useMemo(() => {
     if (isCrossChain) return 'lifi-smart';
+    if (!fromChainIsEvm && router !== 'lifi-smart') return 'lifi-smart';
     if (router === 'auto') return autoPicked ?? 'lifi-smart';
     return router;
-  }, [router, isCrossChain, autoPicked]);
+  }, [router, isCrossChain, autoPicked, fromChainIsEvm]);
 
   const active =
     effectiveRouter === 'oneinch-direct'
@@ -519,13 +545,39 @@ export default function SwapCard() {
   const { data: feeData } = useFeeData({
     chainId,
     query: {
-      enabled: Boolean(fromIsNative),
+      enabled: Boolean(fromIsNative && fromChainIsEvm),
       staleTime: 12_000,
     },
   });
 
+  useEffect(() => {
+    if (!fromIsNative || !fromChainIsSolana) return;
+
+    const controller = new AbortController();
+    async function loadSolanaReserve() {
+      try {
+        const res = await fetch('/api/solana-fee-reserve', {
+          signal: controller.signal,
+          cache: 'no-store',
+        });
+        const json = await res.json().catch(() => null);
+        const lamports = BigInt(String(json?.lamports || '0'));
+        if (!controller.signal.aborted && lamports > 0n) {
+          setSolanaNativeReserveLamports(lamports);
+        }
+      } catch {
+        // Keep the local fallback reserve.
+      }
+    }
+
+    loadSolanaReserve();
+    return () => controller.abort();
+  }, [fromIsNative, fromChainIsSolana]);
+
   const nativeGasBuffer = useMemo(() => {
     if (!fromIsNative) return 0n;
+    if (fromChainIsSolana) return solanaNativeReserveLamports;
+    if (!fromChainIsEvm) return 0n;
     // Chain-aware buffer based on current fee data.
     // L2s tend to have lower fees than L1, while mainnet needs more headroom.
     const gasLimit = defaultSwapGasLimit(chainId);
@@ -541,7 +593,15 @@ export default function SwapCard() {
     }
     if (buffer < minReserve) buffer = minReserve;
     return buffer;
-  }, [fromIsNative, chainId, feeData?.maxFeePerGas, feeData?.gasPrice]);
+  }, [
+    fromIsNative,
+    fromChainIsSolana,
+    solanaNativeReserveLamports,
+    fromChainIsEvm,
+    chainId,
+    feeData?.maxFeePerGas,
+    feeData?.gasPrice,
+  ]);
 
 
   const toAmountFloat = quote && toToken ? safeParseFloat(formatTokenAmount(quote.estimate.toAmount, toToken.decimals, 8)) : 0;
@@ -698,16 +758,16 @@ export default function SwapCard() {
 
   // Approval logic (LiFi quote provides approvalAddress when needed)
   const spender = quote?.estimate.approvalAddress;
-  const needsApproval = !!spender && fromToken?.address !== ZERO;
+  const needsApproval = fromChainIsEvm && !!spender && fromToken ? !isNativeTokenAddressForChain(chainId, fromToken.address) : false;
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     abi: ERC20_ABI,
-    address: fromToken?.address as Address | undefined,
+    address: fromChainIsEvm ? (fromToken?.address as Address | undefined) : undefined,
     functionName: 'allowance',
-    args: address && spender ? [address as Address, spender] : undefined,
+    args: address && spender ? [address as Address, spender as Address] : undefined,
     chainId,
     query: {
-      enabled: Boolean(isConnected && address && spender && fromToken && fromToken.address !== ZERO),
+      enabled: Boolean(isConnected && fromChainIsEvm && address && spender && fromToken && !isNativeTokenAddressForChain(chainId, fromToken.address)),
       // Approvals should reflect quickly; stale allowance makes the UI look "stuck".
       staleTime: 0,
       refetchInterval: 4_000,
@@ -767,12 +827,16 @@ export default function SwapCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [approveReceipt]);
 
-  const [lastTx, setLastTx] = useState<{ hash: `0x${string}`; chainId: number } | null>(null);
+  const [lastTx, setLastTx] = useState<{ hash: string; chainId: number; txType?: 'evm' | 'solana' } | null>(null);
   const { data: receipt, isLoading: receiptLoading } = useWaitForTransactionReceipt({
-    hash: lastTx?.hash,
+    hash: lastTx?.txType === 'solana' ? undefined : (lastTx?.hash as `0x${string}` | undefined),
     chainId: lastTx?.chainId,
-    query: { enabled: Boolean(lastTx?.hash) },
+    query: { enabled: Boolean(lastTx?.hash && lastTx?.txType !== 'solana') },
   });
+  const [solanaReceiptLoading, setSolanaReceiptLoading] = useState(false);
+  const [solanaReceiptConfirmed, setSolanaReceiptConfirmed] = useState(false);
+  const receiptConfirmed = lastTx?.txType === 'solana' ? solanaReceiptConfirmed : Boolean(receipt);
+  const receiptBusy = lastTx?.txType === 'solana' ? solanaReceiptLoading : receiptLoading;
 
   const [uiError, setUiError] = useState<string | null>(null);
 
@@ -782,7 +846,7 @@ export default function SwapCard() {
   // After a successful swap, refresh Alchemy balances and DexScreener prices immediately.
   // The token selector also refreshes its wallet-token list when it is open.
   useEffect(() => {
-    if (!receipt || !lastTx?.hash) return;
+    if (!receiptConfirmed || !lastTx?.hash) return;
     if (lastRefreshedTx === lastTx.hash) return;
 
     setLastRefreshedTx(lastTx.hash);
@@ -795,7 +859,7 @@ export default function SwapCard() {
         })
       );
     }
-  }, [receipt, lastTx?.hash, chainId, toChainId, lastRefreshedTx]);
+  }, [receiptConfirmed, lastTx?.hash, chainId, toChainId, lastRefreshedTx]);
 
   // Clear transient UI errors (e.g., "User rejected the request") as soon as the user changes inputs.
   useEffect(() => {
@@ -812,6 +876,7 @@ export default function SwapCard() {
   }, [walletChainId]);
 
   async function ensureCorrectChain() {
+    if (fromChainIsSolana) return;
     if (!switchChainAsync) return;
     const targetChainId = fromToken?.chainId || chainId;
     if (walletChainId !== targetChainId) {
@@ -824,7 +889,8 @@ export default function SwapCard() {
     // Reset any previous approval tracking.
     setApproveTx(null);
     if (!isConnected || !address) return setUiError('Connect wallet first.');
-    if (!fromToken || fromToken.address === ZERO) return setUiError('No approval needed for native token.');
+    if (!fromChainIsEvm) return setUiError('Solana swaps do not use ERC-20 approvals.');
+    if (!fromToken || isNativeTokenAddressForChain(chainId, fromToken.address)) return setUiError('No approval needed for native token.');
     if (!spender) return setUiError('Missing approval address (no quote).');
 
     try {
@@ -833,10 +899,10 @@ export default function SwapCard() {
       if (approveAmount <= 0n) return setUiError('Enter an amount to approve.');
       const hash = await writeContractAsync({
         abi: ERC20_ABI,
-        address: fromToken.address,
+        address: fromToken.address as Address,
         functionName: 'approve',
         // Safer UX: approve only the exact amount entered (not unlimited).
-        args: [spender, approveAmount],
+        args: [spender as Address, approveAmount],
         chainId: fromToken.chainId || chainId,
       });
 
@@ -859,20 +925,39 @@ export default function SwapCard() {
 
   async function onSwap() {
     setUiError(null);
-    if (!isConnected || !address) return setUiError('Connect wallet first.');
+    if (fromChainIsSolana) {
+      if (!solanaWallet.connected || !solanaWallet.publicKey) return setUiError('Connect Solana wallet first.');
+    } else if (!isConnected || !address) {
+      return setUiError('Connect wallet first.');
+    }
     if (!quote?.tx) return setUiError('No transaction data. Get a quote first.');
     if (needsApproval && !allowanceOk) return setUiError('Approval required.');
     if (lowLiquidity) return setUiError('Liquidity looks insufficient for this trade.');
 
     try {
+      if (quote.tx.txType === 'solana') {
+        if (!quote.tx.data) return setUiError('Missing Solana transaction payload.');
+        const signature = await solanaWallet.sendBase64Transaction(quote.tx.data);
+        setLastTx({ hash: signature, chainId: quote.tx.chainId, txType: 'solana' });
+        setSolanaReceiptConfirmed(false);
+        setSolanaReceiptLoading(true);
+        try {
+          await solanaWallet.confirmSignature(signature);
+          setSolanaReceiptConfirmed(true);
+        } finally {
+          setSolanaReceiptLoading(false);
+        }
+        return;
+      }
+
       await ensureCorrectChain();
       const hash = await sendTransactionAsync({
         chainId: quote.tx.chainId,
-        to: quote.tx.to,
+        to: quote.tx.to as Address,
         data: (quote.tx.data as any) || '0x',
         value: parseTxValue(quote.tx.value),
       });
-      setLastTx({ hash, chainId: quote.tx.chainId });
+      setLastTx({ hash, chainId: quote.tx.chainId, txType: 'evm' });
     } catch (e: any) {
       setUiError(e?.shortMessage || e?.message || 'Swap failed');
     }
@@ -886,7 +971,9 @@ export default function SwapCard() {
     setFromChainManual(true);
     setFromChainId(id);
     setLastTx(null);
+    setSolanaReceiptConfirmed(false);
 
+    if (isSolanaChain(id)) return;
     if (!isConnected) return;
     if (!switchChainAsync) {
       setUiError('Wallet does not support network switching.');
@@ -902,6 +989,9 @@ export default function SwapCard() {
 
   const txUrl = useMemo(() => {
     if (!lastTx?.hash) return null;
+    if (lastTx.txType === 'solana' || isSolanaChain(lastTx.chainId)) {
+      return `https://solscan.io/tx/${lastTx.hash}`;
+    }
     const c = chains.find((x) => x.id === lastTx.chainId);
     const base = c?.blockExplorers?.default?.url;
     if (!base) return null;
@@ -916,35 +1006,63 @@ export default function SwapCard() {
           onSelect={selectSourceChain}
         />
 
-        <ConnectButton.Custom>
-          {({ account, mounted, openAccountModal, openConnectModal }) => {
-            const ready = mounted;
-            const connected = ready && account;
-            return (
-              <button
-                type="button"
-                className={clsx(
-                  'control-button wallet-button',
-                  !connected && 'wallet-muted',
-                )}
-                onClick={connected ? openAccountModal : openConnectModal}
-              >
-                <Wallet size={16} className="muted-icon" />
-                {connected ? (
-                  <span className="max-w-[180px] truncate">{account.displayName}</span>
-                ) : (
-                  <span>Connect wallet</span>
-                )}
-              </button>
-            );
-          }}
-        </ConnectButton.Custom>
+        <div className="wallet-stack">
+          {(fromChainIsEvm || needsDualWallets) && (
+            <ConnectButton.Custom>
+              {({ account, mounted, openAccountModal, openConnectModal }) => {
+                const ready = mounted;
+                const connected = ready && account;
+                return (
+                  <button
+                    type="button"
+                    className={clsx(
+                      'control-button wallet-button',
+                      !connected && 'wallet-muted',
+                    )}
+                    onClick={connected ? openAccountModal : openConnectModal}
+                  >
+                    <Wallet size={16} className="muted-icon" />
+                    {connected ? (
+                      <span className="max-w-[180px] truncate">{account.displayName}</span>
+                    ) : (
+                      <span>Connect EVM</span>
+                    )}
+                  </button>
+                );
+              }}
+            </ConnectButton.Custom>
+          )}
+
+          {(fromChainIsSolana || needsDualWallets) && (
+            <SolanaConnectButton
+              providerReady={solanaWallet.providerReady}
+              connected={solanaWallet.connected}
+              connecting={solanaWallet.connecting}
+              publicKey={solanaWallet.publicKey}
+              walletName={solanaWallet.walletName}
+              onConnect={async () => {
+                try {
+                  await solanaWallet.connect();
+                } catch (e: any) {
+                  setUiError(e?.message || 'Failed to connect Solana wallet');
+                }
+              }}
+              onDisconnect={solanaWallet.disconnect}
+            />
+          )}
+        </div>
       </div>
 
-      {!process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID && (
+      {!fromChainIsSolana && !process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID && (
         <div className="warning-box mt-3">
           Missing <span className="font-mono">NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID</span>. WalletConnect-based wallets
           will not work until you set it.
+        </div>
+      )}
+
+      {needsDualWallets && (
+        <div className="warning-box mt-3">
+          Mixed-family swaps need both wallets connected: the source wallet signs the swap, and the destination wallet supplies the receive address.
         </div>
       )}
 
@@ -986,20 +1104,20 @@ export default function SwapCard() {
                 onClick={() => {
                   if (!fromToken || fromBalanceValue === undefined) return;
                   let raw = fromBalanceValue;
-                  if (fromToken.address === ZERO && nativeGasBuffer > 0n) {
+                  if (isNativeTokenAddressForChain(chainId, fromToken.address) && nativeGasBuffer > 0n) {
                     raw = raw > nativeGasBuffer ? raw - nativeGasBuffer : 0n;
                   }
                   const maxFraction = Math.min(6, fromToken.decimals);
                   const ui = formatTokenAmount(raw.toString(), fromToken.decimals, maxFraction);
                   setAmountUI(sanitizeAmountInput(ui, fromToken.decimals));
                 }}
-                title={fromToken?.address === ZERO ? 'Leaves a small amount for gas' : 'Use your full balance'}
+                title={fromToken && isNativeTokenAddressForChain(chainId, fromToken.address) ? 'Leaves a small amount for gas' : 'Use your full balance'}
               >
                 Max
               </button>
 
               <BalanceLine
-                address={address as Address | undefined}
+                address={fromChainIsSolana ? solanaWallet.publicKey || undefined : address}
                 token={fromToken}
                 priceUSD={fromPrice}
                 balanceRaw={fromBalanceRaw}
@@ -1037,6 +1155,7 @@ export default function SwapCard() {
               setToToken(fromToken);
               setLastTx(null);
 
+              if (isSolanaChain(nextFromChainId)) return;
               if (!isConnected) return;
               if (!switchChainAsync) {
                 setUiError('Wallet does not support network switching.');
@@ -1084,7 +1203,7 @@ export default function SwapCard() {
           <div className="asset-meta-row">
             <span>{toUsd ? formatUSD(toUsd) : '-'}</span>
             <BalanceLine
-              address={address as Address | undefined}
+              address={toChainIsSolana ? solanaWallet.publicKey || undefined : address}
               token={toToken}
               priceUSD={toPrice}
               balanceRaw={toBalanceRaw}
@@ -1287,7 +1406,7 @@ export default function SwapCard() {
                 approving && 'opacity-70',
               )}
               onClick={onApprove}
-              disabled={!isConnected || approving || !fromToken}
+              disabled={!isConnected || !fromChainIsEvm || approving || !fromToken}
             >
               {approving ? 'Approving...' : `Approve ${fromToken?.symbol || ''}`}
             </button>
@@ -1297,11 +1416,11 @@ export default function SwapCard() {
             type="button"
             className={clsx(
               'primary-action',
-              (swapPending || receiptLoading) && 'opacity-80',
+              (swapPending || receiptBusy) && 'opacity-80',
             )}
             onClick={onSwap}
             disabled={
-              !isConnected ||
+              (fromChainIsSolana ? !solanaWallet.connected : !isConnected) ||
               !quote ||
               !quote.tx ||
               quoteLoading ||
@@ -1309,10 +1428,10 @@ export default function SwapCard() {
               insufficientBalance ||
               (needsApproval && !allowanceOk) ||
               swapPending ||
-              receiptLoading
+              receiptBusy
             }
           >
-            {swapPending ? 'Confirm in wallet...' : receiptLoading ? 'Waiting for confirmation...' : 'Swap'}
+            {swapPending ? 'Confirm in wallet...' : receiptBusy ? 'Waiting for confirmation...' : 'Swap'}
           </button>
 
           {lastTx?.hash && (
@@ -1330,7 +1449,7 @@ export default function SwapCard() {
                     )}
                   </div>
                 </div>
-                {receipt ? (
+                {receiptConfirmed ? (
                   <span className="status-pill status-pill-success">
                     <CheckCircle2 size={14} />
                     Confirmed
@@ -1356,7 +1475,7 @@ function BalanceLine({
   balanceRaw,
   loading,
 }: {
-  address?: Address;
+  address?: string;
   token: Token | null;
   priceUSD?: number;
   balanceRaw?: string;
