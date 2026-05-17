@@ -1,15 +1,13 @@
-import { getAddress, isAddress } from 'viem';
-
 import { CHAIN_META } from '@/lib/chainsMeta';
-import type { Address } from '@/lib/types';
+import { EVM_ZERO_ADDRESS, isNativeTokenAddress as isKnownNativeTokenAddress, normalizeTokenAddressForChain } from '@/lib/addresses';
 
-export const NATIVE_TOKEN_ADDRESS: Address = '0x0000000000000000000000000000000000000000';
+export const NATIVE_TOKEN_ADDRESS = EVM_ZERO_ADDRESS;
 
 export type SwapPairUrl = {
   fromChainId: number;
-  fromTokenAddress: Address;
+  fromTokenAddress: string;
   toChainId: number;
-  toTokenAddress: Address;
+  toTokenAddress: string;
 };
 
 export type ParsedSwapPairPath =
@@ -22,20 +20,15 @@ function isSupportedChainId(chainId: number) {
 }
 
 export function isNativeTokenAddress(address?: string | null) {
-  return (address || '').toLowerCase() === NATIVE_TOKEN_ADDRESS;
+  return isKnownNativeTokenAddress(address);
 }
 
-export function normalizeTokenAddress(value: string): Address | null {
+export function normalizeTokenAddress(value: string, chainId?: number): string | null {
   const raw = (value || '').trim();
   if (!raw) return null;
-  if (isNativeTokenAddress(raw)) return NATIVE_TOKEN_ADDRESS;
-  if (!isAddress(raw, { strict: false })) return null;
-
-  try {
-    return getAddress(raw) as Address;
-  } catch {
-    return null;
-  }
+  if (chainId) return normalizeTokenAddressForChain(chainId, raw);
+  if (isNativeTokenAddress(raw)) return raw;
+  return null;
 }
 
 export function buildSwapPairPath(pair: SwapPairUrl) {
@@ -60,8 +53,8 @@ export function parseSwapPairPath(pathname: string): ParsedSwapPairPath {
     return { kind: 'invalid', reason: 'Unsupported chain in shared pair link.' };
   }
 
-  const fromTokenAddress = normalizeTokenAddress(parts[2]);
-  const toTokenAddress = normalizeTokenAddress(parts[4]);
+  const fromTokenAddress = normalizeTokenAddress(parts[2], fromChainId);
+  const toTokenAddress = normalizeTokenAddress(parts[4], toChainId);
   if (!fromTokenAddress || !toTokenAddress) {
     return { kind: 'invalid', reason: 'Invalid token address in shared pair link.' };
   }
