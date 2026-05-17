@@ -1,6 +1,7 @@
 import { formatUnits } from 'viem';
 import type { MinAmountHint, QuoteRequest, RouterId } from '@/lib/types';
 import { cacheGet, cacheSet } from '@/lib/server/cache';
+import { isEvmChain } from '@/lib/chainsMeta';
 
 const LIFI_BASE = process.env.LIFI_BASE_URL || 'https://li.quest';
 const INTEGRATOR = process.env.LIFI_INTEGRATOR || 'swapdex-starter';
@@ -173,7 +174,7 @@ async function lifiQuoteOk(body: QuoteRequest, headers: Record<string, string>, 
 }
 
 async function oneInchQuoteOk(body: QuoteRequest, fromAmount: bigint, timeoutMs = 3500): Promise<boolean> {
-  if (body.fromChainId !== body.toChainId) return false;
+  if (body.fromChainId !== body.toChainId || !isEvmChain(body.fromChainId)) return false;
 
   const base =
     process.env.ONEINCH_BASE_URL || (process.env.ONEINCH_API_KEY ? 'https://api.1inch.dev' : 'https://api.1inch.io');
@@ -206,6 +207,10 @@ function isOneInch(router: RouterId): boolean {
   return String(router).startsWith('oneinch');
 }
 
+function canUseOneInch(body: QuoteRequest): boolean {
+  return isOneInch(body.router) && body.fromChainId === body.toChainId && isEvmChain(body.fromChainId);
+}
+
 export async function computeMinAmountHint(body: QuoteRequest): Promise<MinAmountHint | null> {
   const cacheKey = minCacheKey(body);
   const cached = cacheGet<MinAmountHint>(cacheKey);
@@ -222,7 +227,7 @@ export async function computeMinAmountHint(body: QuoteRequest): Promise<MinAmoun
   const headers: Record<string, string> = { accept: 'application/json' };
   if (process.env.LIFI_API_KEY) headers['x-lifi-api-key'] = process.env.LIFI_API_KEY;
 
-  const ok = (x: bigint) => (isOneInch(body.router) ? oneInchQuoteOk(body, x) : lifiQuoteOk(body, headers, x));
+  const ok = (x: bigint) => (canUseOneInch(body) ? oneInchQuoteOk(body, x) : lifiQuoteOk(body, headers, x));
 
   // Exponential search for an amount that yields a quote.
   const candidates: bigint[] = [];
