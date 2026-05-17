@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { Address, Token } from '@/lib/types';
+import type { Token } from '@/lib/types';
+import { addressCacheKey } from '@/lib/addresses';
+import { getChainMeta } from '@/lib/chainsMeta';
 
 const BALANCE_REFRESH_MS = 45_000;
 const ACTIVE_WINDOW_MS = 5 * 60_000;
@@ -14,11 +16,11 @@ export type TokenBalanceState = {
 };
 
 export function balanceKey(chainId: number, address: string) {
-  return `${chainId}:${address.toLowerCase()}`;
+  return `${chainId}:${addressCacheKey(chainId, address)}`;
 }
 
 export function useTokenBalances(
-  walletAddress: Address | undefined,
+  walletAddress: string | undefined,
   tokens: Array<Token | null | undefined>,
   options: { refreshSignal?: number } = {}
 ): TokenBalanceState {
@@ -28,7 +30,7 @@ export function useTokenBalances(
   const lastRefreshSignal = useRef(options.refreshSignal || 0);
 
   const tokensKey = tokens
-    .map((token) => (token?.chainId && token.address ? `${token.chainId}:${token.address.toLowerCase()}` : ''))
+    .map((token) => (token?.chainId && token.address ? balanceKey(token.chainId, token.address) : ''))
     .filter(Boolean)
     .join('|');
 
@@ -48,7 +50,7 @@ export function useTokenBalances(
   }, [tokensKey]);
 
   const itemsKey = useMemo(
-    () => balanceItems.map((item) => `${item.chainId}:${item.address.toLowerCase()}`).join('|'),
+    () => balanceItems.map((item) => balanceKey(item.chainId, item.address)).join('|'),
     [balanceItems]
   );
 
@@ -128,4 +130,27 @@ export function useTokenBalances(
   }, [walletAddress, itemsKey, activityNonce, options.refreshSignal, balanceItems]);
 
   return { balances, loading };
+}
+
+export function useMultiWalletTokenBalances(
+  wallets: { evm?: string; solana?: string },
+  tokens: Array<Token | null | undefined>,
+  options: { refreshSignal?: number } = {},
+): TokenBalanceState {
+  const evmTokens = useMemo(
+    () => tokens.filter((token) => token?.chainId && getChainMeta(token.chainId).chainType === 'EVM'),
+    [tokens],
+  );
+  const solanaTokens = useMemo(
+    () => tokens.filter((token) => token?.chainId && getChainMeta(token.chainId).chainType === 'SVM'),
+    [tokens],
+  );
+
+  const evm = useTokenBalances(wallets.evm, evmTokens, options);
+  const solana = useTokenBalances(wallets.solana, solanaTokens, options);
+
+  return {
+    balances: useMemo(() => ({ ...evm.balances, ...solana.balances }), [evm.balances, solana.balances]),
+    loading: evm.loading || solana.loading,
+  };
 }
