@@ -21,7 +21,7 @@ The app focuses on keeping swap execution more transparent by showing route sele
 - Same-chain route comparison in **Auto (best)** mode
 - Cross-chain swaps across supported EVM networks and Solana routes supported by LI.FI
 - Solana token lists, token metadata, USD prices, balances, and LI.FI transaction payload support
-- Solana wallet support via injected wallets such as Phantom or Solflare
+- Solana wallet support via Wallet Standard and injected wallets such as Phantom, MetaMask, Bitget, Solflare, and Backpack
 - EVM wallets via MetaMask/WalletConnect, with Solana and EVM wallets handled separately in the UI
 - Token selector and chain selector for both swap sides
 - Wallet token balances in the token picker, plus DexScreener USD estimates for selected swap tokens
@@ -87,7 +87,7 @@ Create a `.env` file in the project root. then fill all env from [.env.example](
 ### Wallet setup note
 
 - EVM swaps use MetaMask or any WalletConnect-supported wallet.
-- Solana swaps use an injected Solana wallet such as Phantom.
+- Solana swaps use a Wallet Standard or injected Solana wallet such as Phantom, MetaMask, Bitget, Solflare, or Backpack.
 - Cross-chain flows can require both wallet types if the source and destination chains are different families.
 
 ### 3. Run the development server
