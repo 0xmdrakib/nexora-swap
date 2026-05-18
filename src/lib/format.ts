@@ -36,5 +36,5 @@ export function formatUSD(n: number) {
 export function formatHash(hash?: string, left = 8, right = 6) {
   if (!hash) return '';
   if (hash.length <= left + right + 3) return hash;
-  return `${hash.slice(0, left)}…${hash.slice(-right)}`;
+  return `${hash.slice(0, left)}...${hash.slice(-right)}`;
 }
