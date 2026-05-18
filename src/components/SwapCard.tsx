@@ -179,6 +179,7 @@ export default function SwapCard() {
   const toChainIsSolana = isSolanaChain(toChainId);
   const toChainIsEvm = isEvmChain(toChainId);
   const needsDualWallets = (fromChainIsEvm && toChainIsSolana) || (fromChainIsSolana && toChainIsEvm);
+  const missingDualWallet = needsDualWallets && (!isConnected || !solanaWallet.connected);
 
   const [amountUI, setAmountUI] = useState('');
   const debouncedAmountUI = useDebounce(amountUI, 350);
@@ -399,6 +400,7 @@ export default function SwapCard() {
   }, [fromToken, fromBalanceValue, fromAmountRaw]);
 
   const isCrossChain = chainId !== toChainId;
+  const oneInchEligible = !isCrossChain && fromChainIsEvm && toChainIsEvm;
 
   const autoSlippageUI = useMemo(() => {
     const a = (fromToken?.symbol || '').toUpperCase();
@@ -423,25 +425,29 @@ export default function SwapCard() {
     }
 
     // gas.zip is cross-chain only; if user switches back to same-chain, fall back.
-    if (!isCrossChain && router === 'gaszip') setRouter('auto');
-    if (!fromChainIsEvm && (router === 'auto' || router === 'oneinch-direct')) setRouter('lifi-smart');
-  }, [isCrossChain, router, fromChainIsEvm]);
+    if (router === 'gaszip') {
+      setRouter(oneInchEligible ? 'auto' : 'lifi-smart');
+      return;
+    }
+    if (!oneInchEligible && (router === 'auto' || router === 'oneinch-direct')) setRouter('lifi-smart');
+  }, [isCrossChain, router, oneInchEligible]);
 
   const routeOptions = useMemo(() => {
-    // Always show all routes, but disable ones that don't apply.
-    // This keeps the menu consistent and avoids "where did my option go?" confusion.
-    return [
-      { value: 'auto', label: 'Auto (best)', disabled: isCrossChain || !fromChainIsEvm },
-      { value: 'lifi-smart', label: 'LiFi Smart Routing' },
-      { value: 'oneinch-direct', label: '1inch Direct (same-chain)', disabled: isCrossChain || !fromChainIsEvm },
-      { value: 'gaszip', label: 'gas.zip (cross-chain only)', disabled: !isCrossChain },
-    ];
-  }, [isCrossChain, fromChainIsEvm]);
+    const options = [{ value: 'lifi-smart', label: 'LiFi Smart Routing' }];
+    if (oneInchEligible) {
+      options.unshift({ value: 'auto', label: 'Auto (best)' });
+      options.push({ value: 'oneinch-direct', label: '1inch Direct (EVM same-chain)' });
+    }
+    if (isCrossChain) {
+      options.push({ value: 'gaszip', label: 'gas.zip (cross-chain only)' });
+    }
+    return options;
+  }, [isCrossChain, oneInchEligible]);
 
   // Auto routing strategy (production-realistic):
   // - Cross-chain => LiFi only
   // - Same-chain + Auto => compare 1inch vs LiFi and pick the better quote (fallback gracefully)
-  const autoEnabled = router === 'auto' && !isCrossChain && fromChainIsEvm;
+  const autoEnabled = router === 'auto' && oneInchEligible;
 
   const quoteReqCommon = useMemo(() => {
     const fromAddress = fromChainIsSolana ? solanaWallet.publicKey : address;
@@ -474,11 +480,11 @@ export default function SwapCard() {
   ]);
 
   const quoteReqOneInch: QuoteRequest | undefined = useMemo(() => {
-    if (isCrossChain) return undefined;
+    if (!oneInchEligible) return undefined;
     if (!quoteReqCommon) return undefined;
     if (!(autoEnabled || router === 'oneinch-direct')) return undefined;
     return { ...quoteReqCommon, router: 'oneinch-direct' };
-  }, [quoteReqCommon, autoEnabled, router, isCrossChain]);
+  }, [quoteReqCommon, autoEnabled, router, oneInchEligible]);
 
   const quoteReqLiFi: QuoteRequest | undefined = useMemo(() => {
     if (!quoteReqCommon) return undefined;
@@ -518,11 +524,11 @@ export default function SwapCard() {
   }, [autoEnabled, one.data, li.data]);
 
   const effectiveRouter: RouterId = useMemo(() => {
-    if (isCrossChain) return 'lifi-smart';
-    if (!fromChainIsEvm && router !== 'lifi-smart') return 'lifi-smart';
+    if (isCrossChain) return router === 'gaszip' ? 'gaszip' : 'lifi-smart';
+    if (!oneInchEligible && router !== 'lifi-smart') return 'lifi-smart';
     if (router === 'auto') return autoPicked ?? 'lifi-smart';
     return router;
-  }, [router, isCrossChain, autoPicked, fromChainIsEvm]);
+  }, [router, isCrossChain, autoPicked, oneInchEligible]);
 
   const active =
     effectiveRouter === 'oneinch-direct'
@@ -536,6 +542,8 @@ export default function SwapCard() {
     loading: quoteLoading,
     minAmount,
   } = active;
+
+  const quoteBusy = quoteLoading || (router === 'auto' && oneInchEligible && (one.loading || li.loading));
 
   // USD under the input (instant, based on the user's typed amount).
   const fromAmountFloat = safeParseFloat(amountUI);
@@ -868,6 +876,13 @@ export default function SwapCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fromAmountRaw, chainId, toChainId, fromToken?.address, toToken?.address, router]);
 
+  useEffect(() => {
+    setUiError(null);
+    setLastTx(null);
+    setSolanaReceiptConfirmed(false);
+    setSolanaReceiptLoading(false);
+  }, [router, fromChainId, toChainId, fromToken?.address, toToken?.address]);
+
 
   // Clear tx status when switching wallet network. Otherwise wagmi may look for the receipt on the new chain
   // and the UI can incorrectly show 'Waiting for confirmation...' for an already-confirmed tx.
@@ -1064,9 +1079,9 @@ export default function SwapCard() {
         </div>
       )}
 
-      {needsDualWallets && (
-        <div className="warning-box mt-3">
-          Mixed-family swaps need both wallets connected: the source wallet signs the swap, and the destination wallet supplies the receive address.
+      {missingDualWallet && (
+        <div className="warning-box mt-3 compact-warning">
+          Connect both EVM and Solana wallets for this swap.
         </div>
       )}
 
@@ -1182,7 +1197,7 @@ export default function SwapCard() {
           <div className="asset-label">You receive</div>
           <div className="asset-row">
             <div className="amount-output">
-              {quoteLoading ? (
+              {quoteBusy ? (
                 <span className="amount-output-loading">...</span>
               ) : quote && toToken ? (
                 formatTokenAmount(quote.estimate.toAmount, toToken.decimals, 8)
@@ -1268,10 +1283,14 @@ export default function SwapCard() {
               />
             </div>
             <div className="helper-text select-note">
-              Cross-chain swaps are handled by LiFi. 1inch Direct is enabled for same-chain swaps.
-              {router === 'auto' && !isCrossChain && (
+              {isCrossChain
+                ? 'Cross-chain swaps are handled by LiFi. gas.zip is available only when that bridge supports the route.'
+                : oneInchEligible
+                  ? 'Same-chain EVM swaps can use 1inch Direct or LiFi.'
+                  : 'Solana swaps use LiFi Smart Routing. 1inch Direct is EVM same-chain only.'}
+              {router === 'auto' && oneInchEligible && (
                 <div className="mt-2 font-semibold" style={{ color: 'var(--muted)' }}>
-                  {quoteLoading && !quote
+                  {quoteBusy && !quote
                     ? 'Auto is comparing routes...'
                     : `Auto picked: ${effectiveRouter === 'oneinch-direct' ? '1inch Direct' : 'LiFi Smart Routing'}`}
                 </div>
@@ -1379,9 +1398,9 @@ export default function SwapCard() {
                         ? `Amount too low. Minimum for this pair is ${minAmount.fromAmountFormatted} ${fromToken?.symbol || ''}${
                             minAmount.fromAmountUSD ? ` (about $${minAmount.fromAmountUSD})` : ''
                           }.`
-                        : 'Amount too low for this pair. Calculating minimum...'
+                        : 'Amount too low for this route. Try a larger amount or another route.'
                       : quoteReason === 'NO_LIQUIDITY'
-                        ? router === 'gaszip'
+                        ? effectiveRouter === 'gaszip'
                           ? 'This pair is not supported on gas.zip. Try LiFi Smart Routing.'
                           : 'Liquidity not found for this pair.'
                         : quoteError}
@@ -1425,9 +1444,10 @@ export default function SwapCard() {
             onClick={onSwap}
             disabled={
               (fromChainIsSolana ? !solanaWallet.connected : !isConnected) ||
+              missingDualWallet ||
               !quote ||
               !quote.tx ||
-              quoteLoading ||
+              quoteBusy ||
               lowLiquidity ||
               insufficientBalance ||
               (needsApproval && !allowanceOk) ||
