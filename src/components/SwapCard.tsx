@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { usePathname } from 'next/navigation';
 import {
   useAccount,
@@ -14,7 +13,7 @@ import {
   useWriteContract,
 } from 'wagmi';
 import { parseUnits } from 'viem';
-import { AlertTriangle, ArrowDownUp, CheckCircle2, ChevronDown, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownUp, CheckCircle2, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 
 import type { Address, QuoteRequest, RouterId, Token } from '@/lib/types';
@@ -36,6 +35,7 @@ import {
 import TokenSelect from './TokenSelect';
 import ChainSelect from './ChainSelect';
 import SolanaConnectButton from './SolanaConnectButton';
+import EvmConnectButton from './EvmConnectButton';
 import { Select } from './ui/Select';
 
 
@@ -203,6 +203,7 @@ export default function SwapCard() {
   const [shareHydrating, setShareHydrating] = useState(false);
   const [shareHydrationError, setShareHydrationError] = useState<string | null>(null);
   const [solanaNativeReserveLamports, setSolanaNativeReserveLamports] = useState<bigint>(20_000n);
+  const [compactWalletLabels, setCompactWalletLabels] = useState(false);
 
   const sharedPairFromPath = useMemo(() => parseSwapPairPath(pathname), [pathname]);
 
@@ -582,6 +583,15 @@ export default function SwapCard() {
     return () => controller.abort();
   }, [fromIsNative, fromChainIsSolana]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const query = window.matchMedia('(max-width: 420px)');
+    const update = () => setCompactWalletLabels(query.matches);
+    update();
+    query.addEventListener?.('change', update);
+    return () => query.removeEventListener?.('change', update);
+  }, []);
+
   const nativeGasBuffer = useMemo(() => {
     if (!fromIsNative) return 0n;
     if (fromChainIsSolana) return solanaNativeReserveLamports;
@@ -621,16 +631,64 @@ export default function SwapCard() {
   const minToAmountFloat = safeParseFloat(minToAmountStr);
   const minToUsd = toPrice > 0 && minToAmountFloat > 0 ? minToAmountFloat * toPrice : 0;
 
+  const [nativePriceUsdForFees, setNativePriceUsdForFees] = useState(0);
+
   // Cross-chain swaps can require extra native value (bridge / messaging fee).
   // Wallets often show this as a bigger 'You send' than the typed amount because it
   // includes both the swap amount and the bridge/message fee inside tx.value.
-  const txValueWei = useMemo(() => {
+  const quoteTxValueRaw = useMemo(() => {
     try {
       return quote?.tx?.value ? parseTxValue(quote.tx.value) : 0n;
     } catch {
       return 0n;
     }
   }, [quote?.tx?.value]);
+
+  const nativeDecimals = useMemo(() => {
+    try {
+      return getChainMeta(chainId).nativeDecimals || 18;
+    } catch {
+      return 18;
+    }
+  }, [chainId]);
+
+  const estimatedCrossChainFeeRaw = useMemo(() => {
+    if (!isCrossChain) return 0n;
+    if (quoteTxValueRaw > 0n) return 0n;
+    if (quote?.estimate?.gasUSD && nativePriceUsdForFees > 0) {
+      const feeUsd = Number(quote.estimate.gasUSD);
+      if (Number.isFinite(feeUsd) && feeUsd > 0) {
+        try {
+          return parseUnits((feeUsd / nativePriceUsdForFees).toFixed(nativeDecimals), nativeDecimals);
+        } catch {
+          return 0n;
+        }
+      }
+    }
+    return fromChainIsSolana ? solanaNativeReserveLamports : 0n;
+  }, [
+    isCrossChain,
+    quoteTxValueRaw,
+    quote?.estimate?.gasUSD,
+    nativePriceUsdForFees,
+    nativeDecimals,
+    fromChainIsSolana,
+    solanaNativeReserveLamports,
+  ]);
+
+  const txValueWei = useMemo(() => {
+    if (!quote || !isCrossChain) return quoteTxValueRaw;
+    if (quoteTxValueRaw > 0n) return quoteTxValueRaw;
+    if (!fromIsNative) return 0n;
+
+    let fromRaw = 0n;
+    try {
+      fromRaw = BigInt(quote.estimate.fromAmount || fromAmountRaw || '0');
+    } catch {
+      fromRaw = 0n;
+    }
+    return fromRaw + estimatedCrossChainFeeRaw;
+  }, [quote, isCrossChain, quoteTxValueRaw, fromIsNative, estimatedCrossChainFeeRaw, fromAmountRaw]);
 
   const nativeSymbol = useMemo(() => {
     try {
@@ -643,8 +701,6 @@ export default function SwapCard() {
   // For bridge/messaging fees we need the USD price of the source-chain native token.
   // Previously we only computed USD when the "from" token was native, which caused
   // fee USD to disappear when swapping from an ERC20 (e.g. USDC -> ... cross-chain).
-  const [nativePriceUsdForFees, setNativePriceUsdForFees] = useState(0);
-
   useEffect(() => {
     // Always clear first to avoid showing a stale USD value while we resolve.
     setNativePriceUsdForFees(0);
@@ -687,7 +743,7 @@ export default function SwapCard() {
 
   const bridgeFeeWei = useMemo(() => {
     if (!quote || !isCrossChain) return 0n;
-    if (txValueWei === 0n) return 0n;
+    if (txValueWei === 0n && estimatedCrossChainFeeRaw === 0n) return 0n;
 
     let fromWei = 0n;
     try {
@@ -698,17 +754,18 @@ export default function SwapCard() {
 
     if (fromIsNative) {
       // Native token swaps: tx.value typically = amount + message/bridge fee
-      return txValueWei > fromWei ? txValueWei - fromWei : 0n;
+      if (txValueWei > fromWei) return txValueWei - fromWei;
+      return estimatedCrossChainFeeRaw;
     }
     // ERC20 swaps: tx.value is usually only the message/bridge fee (paid in native)
     return txValueWei;
-  }, [quote, isCrossChain, txValueWei, fromIsNative, fromAmountRaw]);
+  }, [quote, isCrossChain, txValueWei, fromIsNative, fromAmountRaw, estimatedCrossChainFeeRaw]);
 
   const bridgeFeeStr = useMemo(() => {
     // For cross-chain routes we show this row even when the fee is 0.
     if (!isCrossChain) return '';
-    return formatTokenAmount(bridgeFeeWei.toString(), 18, 8);
-  }, [isCrossChain, bridgeFeeWei]);
+    return formatTokenAmount(bridgeFeeWei.toString(), nativeDecimals, 8);
+  }, [isCrossChain, bridgeFeeWei, nativeDecimals]);
 
   const bridgeFeeUsd = useMemo(() => {
     if (!bridgeFeeStr) return 0;
@@ -720,8 +777,8 @@ export default function SwapCard() {
   const totalValueStr = useMemo(() => {
     // For cross-chain routes we show this row even when tx.value is 0.
     if (!quote || !isCrossChain) return '';
-    return formatTokenAmount(txValueWei.toString(), 18, 8);
-  }, [quote, isCrossChain, txValueWei]);
+    return formatTokenAmount(txValueWei.toString(), nativeDecimals, 8);
+  }, [quote, isCrossChain, txValueWei, nativeDecimals]);
 
   const totalValueUsd = useMemo(() => {
     if (!totalValueStr) return 0;
@@ -1023,29 +1080,10 @@ export default function SwapCard() {
 
         <div className="wallet-stack">
           {(fromChainIsEvm || needsDualWallets) && (
-            <ConnectButton.Custom>
-              {({ account, mounted, openAccountModal, openConnectModal }) => {
-                const ready = mounted;
-                const connected = ready && account;
-                return (
-                  <button
-                    type="button"
-                    className={clsx(
-                      'control-button wallet-button',
-                      !connected && 'wallet-muted',
-                    )}
-                    onClick={connected ? openAccountModal : openConnectModal}
-                  >
-                    <Wallet size={16} className="muted-icon" />
-                    {connected ? (
-                      <span className="max-w-[180px] truncate">{account.displayName}</span>
-                    ) : (
-                      <span>Connect EVM</span>
-                    )}
-                  </button>
-                );
-              }}
-            </ConnectButton.Custom>
+            <EvmConnectButton
+              compactAddress={compactWalletLabels && needsDualWallets}
+              onError={(message) => setUiError(message)}
+            />
           )}
 
           {(fromChainIsSolana || needsDualWallets) && (
@@ -1067,6 +1105,7 @@ export default function SwapCard() {
                 }
               }}
               onDisconnect={solanaWallet.disconnect}
+              compactAddress={compactWalletLabels && needsDualWallets}
             />
           )}
         </div>
@@ -1310,7 +1349,7 @@ export default function SwapCard() {
                     : '-'}
                 </div>
 
-                {isCrossChain && totalValueStr ? (
+                {isCrossChain ? (
                   <div className="mt-3 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="quote-muted">Bridge DEX fee (est.)</span>
@@ -1321,9 +1360,9 @@ export default function SwapCard() {
                       </span>
                     </div>
                     <div className="mt-1 flex items-center gap-2">
-                      <span className="quote-muted">Wallet will send (tx value)</span>
+                      <span className="quote-muted">Wallet will send</span>
                       <span className="font-semibold tabular-nums">
-                        {`${totalValueStr} ${nativeSymbol} (${formatUSD(totalValueUsd)})`}
+                        {totalValueStr ? `${totalValueStr} ${nativeSymbol} (${formatUSD(totalValueUsd)})` : '-'}
                       </span>
                     </div>
                     {bridgeFeeDominates ? (
