@@ -470,13 +470,14 @@ input:focus-visible {
 }
 
 .wallet-menu-disconnect {
-  border-top: 1px solid var(--border);
-  color: #ff6f63;
-  background: color-mix(in srgb, #ff6f63 10%, transparent);
+  border-top: 1px solid color-mix(in srgb, #ff6f63 34%, var(--border));
+  color: #ff7a70;
+  background: color-mix(in srgb, #ff6f63 13%, transparent);
+  font-weight: 800;
 }
 
 .wallet-menu-disconnect:hover {
-  background: color-mix(in srgb, #ff6f63 18%, transparent);
+  background: color-mix(in srgb, #ff6f63 22%, transparent);
 }
 
 .wallet-menu-walletconnect {
