@@ -1,4 +1,14 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
+import {
+  bitgetWallet,
+  coinbaseWallet,
+  injectedWallet,
+  metaMaskWallet,
+  okxWallet,
+  rabbyWallet,
+  trustWallet,
+  walletConnectWallet,
+} from '@rainbow-me/rainbowkit/wallets';
 import { http } from 'wagmi';
 import { arbitrum, avalanche, base, bsc, mainnet, optimism, polygon } from 'wagmi/chains';
 
@@ -21,6 +31,24 @@ function rpcUrl(chainId: number) {
 export const config = getDefaultConfig({
   appName: 'Nexora Swap',
   projectId,
+  wallets: [
+    {
+      groupName: 'Injected',
+      wallets: [
+        metaMaskWallet,
+        rabbyWallet,
+        bitgetWallet,
+        okxWallet,
+        trustWallet,
+        coinbaseWallet,
+        injectedWallet,
+      ],
+    },
+    {
+      groupName: 'WalletConnect',
+      wallets: [walletConnectWallet],
+    },
+  ],
   chains: [...SUPPORTED_CHAINS],
   transports: {
     [mainnet.id]: rpcUrl(mainnet.id) ? http(rpcUrl(mainnet.id)) : http(),
