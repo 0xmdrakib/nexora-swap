@@ -7,6 +7,7 @@ import type { Address } from '@/lib/types';
 export const EVM_ZERO_ADDRESS: Address = '0x0000000000000000000000000000000000000000';
 export const SOLANA_NATIVE_ADDRESS = '11111111111111111111111111111111';
 export const SOLANA_WRAPPED_SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
+const SOLANA_ADDRESS_CACHE = new Map<string, string | null>();
 
 export function isEvmAddress(value?: string | null): value is Address {
   return Boolean(value && isAddress(value, { strict: false }));
@@ -36,9 +37,16 @@ export function isSolanaAddress(value?: string | null) {
 export function normalizeSolanaAddress(value?: string | null): string | null {
   const s = (value || '').trim();
   if (!s) return null;
+  const cached = SOLANA_ADDRESS_CACHE.get(s);
+  if (cached !== undefined) return cached;
   try {
-    return new PublicKey(s).toBase58();
+    const normalized = new PublicKey(s).toBase58();
+    if (SOLANA_ADDRESS_CACHE.size > 5000) SOLANA_ADDRESS_CACHE.clear();
+    SOLANA_ADDRESS_CACHE.set(s, normalized);
+    return normalized;
   } catch {
+    if (SOLANA_ADDRESS_CACHE.size > 5000) SOLANA_ADDRESS_CACHE.clear();
+    SOLANA_ADDRESS_CACHE.set(s, null);
     return null;
   }
 }
