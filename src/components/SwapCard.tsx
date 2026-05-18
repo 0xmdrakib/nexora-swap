@@ -1040,9 +1040,13 @@ export default function SwapCard() {
               connecting={solanaWallet.connecting}
               publicKey={solanaWallet.publicKey}
               walletName={solanaWallet.walletName}
-              onConnect={async () => {
+              walletIcon={solanaWallet.walletIcon}
+              providers={solanaWallet.providers}
+              selectedName={solanaWallet.selectedName}
+              onSelectWallet={solanaWallet.selectWallet}
+              onConnect={async (walletName?: string) => {
                 try {
-                  await solanaWallet.connect();
+                  await solanaWallet.connect(walletName);
                 } catch (e: any) {
                   setUiError(e?.message || 'Failed to connect Solana wallet');
                 }
