@@ -5,6 +5,8 @@ import type { Token } from '@/lib/types';
 import { addressCacheKey, normalizeTokenAddressForChain } from '@/lib/addresses';
 
 const LS_KEY = 'swapdex:customTokens:v1';
+const REMOTE_CACHE = new Map<number, Token[]>();
+const REMOTE_INFLIGHT = new Map<number, Promise<Token[]>>();
 
 function readCustomTokens(): Token[] {
   if (typeof window === 'undefined') return [];
@@ -42,16 +44,36 @@ export function useTokenList(chainId?: number) {
     // flash stale results when the user switches chains while the modal is open.
     setRemote([]);
 
+    const cached = REMOTE_CACHE.get(chainId);
+    if (cached) {
+      setRemote(cached);
+      setLoading(false);
+      setError(null);
+      return () => {
+        ignore = true;
+      };
+    }
+
     setLoading(true);
     setError(null);
-    fetch(`/api/tokens?chainId=${chainId}`, { cache: 'no-store' })
-      .then(async (r) => {
+
+    const inflight =
+      REMOTE_INFLIGHT.get(chainId) ||
+      (async () => {
+        const r = await fetch(`/api/tokens?chainId=${chainId}`, { cache: 'no-store' });
         if (!r.ok) throw new Error(await r.text());
-        return (await r.json()) as { tokens: Token[] };
-      })
-      .then((data) => {
+        const data = (await r.json()) as { tokens: Token[] };
+        const tokens = data.tokens || [];
+        REMOTE_CACHE.set(chainId, tokens);
+        return tokens;
+      })();
+
+    REMOTE_INFLIGHT.set(chainId, inflight);
+
+    inflight
+      .then((tokens) => {
         if (ignore) return;
-        setRemote(data.tokens || []);
+        setRemote(tokens);
       })
       .catch((e) => {
         if (ignore) return;
@@ -60,6 +82,7 @@ export function useTokenList(chainId?: number) {
       .finally(() => {
         if (ignore) return;
         setLoading(false);
+        if (REMOTE_INFLIGHT.get(chainId) === inflight) REMOTE_INFLIGHT.delete(chainId);
       });
 
     return () => {
@@ -127,6 +150,7 @@ export function useTokenList(chainId?: number) {
       writeCustomTokens(out);
       return out;
     });
+    if (chainId) REMOTE_CACHE.delete(chainId);
   }
 
   return { tokens, loading, error, addCustomToken, refresh: () => setRefreshNonce((x) => x + 1) };
