@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Wallet } from 'lucide-react';
 import clsx from 'clsx';
 
-import { formatHash } from '@/lib/format';
 import type { SolanaWalletProvider } from '@/lib/hooks/useSolanaWallet';
 
 type Props = {
@@ -21,6 +20,12 @@ type Props = {
   onDisconnect: () => void | Promise<void>;
 };
 
+function formatWalletAddress(address?: string | null) {
+  if (!address) return '';
+  if (address.length <= 11) return address;
+  return `${address.slice(0, 4)}...${address.slice(-4)}`;
+}
+
 export default function SolanaConnectButton({
   providerReady,
   connected,
@@ -36,13 +41,15 @@ export default function SolanaConnectButton({
 }: Props) {
   const [open, setOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const shortAddress = formatWalletAddress(publicKey);
+  const showWalletIcon = connected && Boolean(walletIcon);
   const label = !providerReady
     ? 'Connect Solana'
     : connected && publicKey
-      ? `${walletName} ${formatHash(publicKey)}`
+      ? shortAddress
       : connecting
         ? 'Connecting...'
-        : selectedName || 'Connect Solana';
+        : 'Connect Solana';
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -62,17 +69,7 @@ export default function SolanaConnectButton({
       return;
     }
 
-    if (!providers.length) {
-      setOpen(true);
-      return;
-    }
-
-    if (providers.length > 1) {
-      setOpen((value) => !value);
-      return;
-    }
-
-    await onConnect(selectedName || providers[0]?.name);
+    setOpen((value) => !value);
   }
 
   return (
@@ -87,15 +84,15 @@ export default function SolanaConnectButton({
             ? connected
               ? 'Solana wallet account'
               : 'Choose a Solana wallet'
-            : 'Install a Solana wallet such as Phantom, Solflare, or Backpack'
+            : 'Install a Solana wallet such as Phantom, MetaMask, Bitget, Solflare, or Backpack'
         }
       >
-        {walletIcon ? (
+        {showWalletIcon ? (
           <img src={walletIcon} alt="" className="wallet-provider-icon" />
         ) : (
           <Wallet size={16} className="muted-icon" />
         )}
-        <span className="max-w-[160px] truncate">{label}</span>
+        <span className="max-w-[130px] truncate">{label}</span>
         <ChevronDown size={14} className={clsx('muted-icon transition-transform', open && 'rotate-180')} />
       </button>
 
@@ -122,14 +119,18 @@ export default function SolanaConnectButton({
                   ) : (
                     <Wallet size={16} />
                   )}
-                  <span>{active && connected && publicKey ? `${wallet.name} ${formatHash(publicKey)}` : wallet.name}</span>
+                  <span>
+                    {active && connected && publicKey
+                      ? `${wallet.name} ${formatWalletAddress(publicKey)}`
+                      : wallet.name}
+                  </span>
                 </button>
               );
             })
           ) : (
             <>
               <div className="wallet-menu-empty">
-                Install Phantom, Solflare, or Backpack to use Solana.
+                Install Phantom, MetaMask, Bitget, Solflare, or Backpack to use Solana.
               </div>
               <button
                 type="button"
