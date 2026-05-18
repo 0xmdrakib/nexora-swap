@@ -46,6 +46,7 @@ export function useQuote(req?: QuoteRequest) {
     const ac = new AbortController();
     let retried = false;
     setLoading(true);
+    setData(null);
     setError(null);
     setReason(null);
     setMinAmount(null);
