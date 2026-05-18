@@ -38,3 +38,17 @@ export function formatHash(hash?: string, left = 8, right = 6) {
   if (hash.length <= left + right + 3) return hash;
   return `${hash.slice(0, left)}...${hash.slice(-right)}`;
 }
+
+export function formatWalletAddress(address?: string | null, visible = 4) {
+  if (!address) return '';
+  const count = Math.max(1, visible);
+
+  if (/^0x[0-9a-fA-F]+$/.test(address)) {
+    const body = address.slice(2);
+    if (body.length <= count * 2 + 3) return address;
+    return `0x${body.slice(0, count)}...${body.slice(-count)}`;
+  }
+
+  if (address.length <= count * 2 + 3) return address;
+  return `${address.slice(0, count)}...${address.slice(-count)}`;
+}
