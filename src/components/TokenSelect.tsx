@@ -178,6 +178,10 @@ export default function TokenSelect({
     setChainMenuOpen(false);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) setChainMenuOpen(false);
+  }, [open]);
+
   // Close only the modal's chain menu on outside click.
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -191,7 +195,7 @@ export default function TokenSelect({
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [chainMenuOpen]);
 
-  // Fetch wallet tokens and native balance from Alchemy.
+  // Fetch wallet tokens and native balance through the chain-aware wallet scanner.
   useEffect(() => {
     let alive = true;
     async function loadWalletTokens() {
@@ -420,6 +424,7 @@ export default function TokenSelect({
         <div
           className="modal-overlay"
           onClick={() => setOpen(false)}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <div
             className="token-modal"
