@@ -1,8 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import * as RadixSelect from '@radix-ui/react-select';
-import { Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import clsx from 'clsx';
 
 export type SelectOption = {
@@ -26,60 +25,72 @@ export function Select({
   placeholder?: string;
   disabled?: boolean;
 }) {
-  const selectedLabel = React.useMemo(() => {
-    const found = options.find((o) => o.value === value);
-    return found?.label;
-  }, [options, value]);
+  const [open, setOpen] = React.useState(false);
+  const shellRef = React.useRef<HTMLDivElement | null>(null);
+  const selected = React.useMemo(() => options.find((o) => o.value === value), [options, value]);
+
+  React.useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!open) return;
+      const el = shellRef.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) setOpen(false);
+    }
+
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
 
   return (
-    <RadixSelect.Root value={value} onValueChange={onChange} disabled={disabled}>
-      <RadixSelect.Trigger
+    <div className="ui-select-shell" ref={shellRef}>
+      <button
+        type="button"
         className={clsx(
           'ui-select-trigger',
           'disabled:cursor-not-allowed disabled:opacity-60',
           className,
         )}
-        aria-label="Select"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false);
+        }}
       >
-        <RadixSelect.Value placeholder={placeholder || 'Select...'}>
-          <span className="truncate">{selectedLabel}</span>
-        </RadixSelect.Value>
-        <RadixSelect.Icon className="muted-icon">
-          <ChevronDown size={16} />
-        </RadixSelect.Icon>
-      </RadixSelect.Trigger>
+        <span className="truncate">{selected?.label || placeholder || 'Select...'}</span>
+        <ChevronDown size={16} className={clsx('muted-icon transition-transform', open && 'rotate-180')} />
+      </button>
 
-      <RadixSelect.Portal>
-        <RadixSelect.Content
-          position="popper"
-          sideOffset={8}
-          className="ui-select-content"
-        >
-          <RadixSelect.ScrollUpButton className="ui-select-scroll">
-            <ChevronUp size={16} />
-          </RadixSelect.ScrollUpButton>
-
-          <RadixSelect.Viewport className="max-h-[280px] p-1">
-            {options.map((opt) => (
-              <RadixSelect.Item
+      {open && (
+        <div className="ui-select-content" role="listbox" aria-label="Select route">
+          {options.map((opt) => {
+            const active = opt.value === value;
+            return (
+              <button
                 key={opt.value}
-                value={opt.value}
+                type="button"
+                role="option"
+                aria-selected={active}
                 disabled={opt.disabled}
-                className="ui-select-item"
+                className={clsx('ui-select-item', active && 'ui-select-item-active')}
+                onClick={() => {
+                  if (opt.disabled) return;
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
               >
-                <RadixSelect.ItemText>{opt.label}</RadixSelect.ItemText>
-                <RadixSelect.ItemIndicator className="absolute right-2 inline-flex items-center justify-center">
-                  <Check size={16} />
-                </RadixSelect.ItemIndicator>
-              </RadixSelect.Item>
-            ))}
-          </RadixSelect.Viewport>
-
-          <RadixSelect.ScrollDownButton className="ui-select-scroll">
-            <ChevronDown size={16} />
-          </RadixSelect.ScrollDownButton>
-        </RadixSelect.Content>
-      </RadixSelect.Portal>
-    </RadixSelect.Root>
+                <span className="min-w-0 truncate">{opt.label}</span>
+                {active && <Check size={16} className="ui-select-check" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
