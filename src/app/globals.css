@@ -103,7 +103,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -470,7 +471,12 @@ input:focus-visible {
 
 .wallet-menu-disconnect {
   border-top: 1px solid var(--border);
-  color: var(--danger);
+  color: #ff6f63;
+  background: color-mix(in srgb, #ff6f63 10%, transparent);
+}
+
+.wallet-menu-disconnect:hover {
+  background: color-mix(in srgb, #ff6f63 18%, transparent);
 }
 
 .wallet-menu-empty {
@@ -507,6 +513,12 @@ input:focus-visible {
   border-color: var(--danger-border);
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+.compact-warning {
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .swap-stack {
@@ -943,6 +955,10 @@ input:focus-visible {
   padding: 8px;
 }
 
+.ui-select-content {
+  padding: 8px;
+}
+
 .chain-dropdown {
   position: absolute;
   left: 0;
@@ -1130,9 +1146,18 @@ input:focus-visible {
   padding: 0 11px;
 }
 
+.ui-select-shell {
+  position: relative;
+  min-width: 0;
+}
+
 .ui-select-content {
-  z-index: 9999;
-  min-width: var(--radix-select-trigger-width);
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 10001;
+  min-width: 100%;
   overflow: hidden;
 }
 
@@ -1147,6 +1172,8 @@ input:focus-visible {
   position: relative;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   border-radius: 16px;
   color: var(--text);
   font-size: 13px;
@@ -1155,11 +1182,21 @@ input:focus-visible {
   user-select: none;
 }
 
+.ui-select-item-active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.ui-select-check {
+  flex: 0 0 auto;
+}
+
 .ui-select-item[data-highlighted] {
   background: var(--surface-hover);
 }
 
-.ui-select-item[data-disabled] {
+.ui-select-item[data-disabled],
+.ui-select-item:disabled {
   pointer-events: none;
   opacity: 0.42;
 }
