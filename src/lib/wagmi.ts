@@ -1,12 +1,5 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
-  bitgetWallet,
-  coinbaseWallet,
-  injectedWallet,
-  metaMaskWallet,
-  okxWallet,
-  rabbyWallet,
-  trustWallet,
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 import { http } from 'wagmi';
@@ -33,22 +26,13 @@ export const config = getDefaultConfig({
   projectId,
   wallets: [
     {
-      groupName: 'Injected',
-      wallets: [
-        metaMaskWallet,
-        rabbyWallet,
-        bitgetWallet,
-        okxWallet,
-        trustWallet,
-        coinbaseWallet,
-        injectedWallet,
-      ],
-    },
-    {
       groupName: 'WalletConnect',
       wallets: [walletConnectWallet],
     },
   ],
+  // Prefer EIP-6963 direct injected-provider discovery over the legacy window.ethereum fallback.
+  // This keeps Rabby, MetaMask, Phantom EVM, Bitget, Coinbase, etc. as distinct wallet choices.
+  multiInjectedProviderDiscovery: true,
   chains: [...SUPPORTED_CHAINS],
   transports: {
     [mainnet.id]: rpcUrl(mainnet.id) ? http(rpcUrl(mainnet.id)) : http(),
