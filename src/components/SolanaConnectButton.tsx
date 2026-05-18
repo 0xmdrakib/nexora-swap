@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Wallet } from 'lucide-react';
 import clsx from 'clsx';
 
+import { formatWalletAddress } from '@/lib/format';
 import type { SolanaWalletProvider } from '@/lib/hooks/useSolanaWallet';
 
 type Props = {
@@ -18,13 +19,8 @@ type Props = {
   onSelectWallet: (walletName: string) => void;
   onConnect: (walletName?: string) => void | Promise<void>;
   onDisconnect: () => void | Promise<void>;
+  compactAddress?: boolean;
 };
-
-function formatWalletAddress(address?: string | null) {
-  if (!address) return '';
-  if (address.length <= 11) return address;
-  return `${address.slice(0, 4)}...${address.slice(-4)}`;
-}
 
 export default function SolanaConnectButton({
   providerReady,
@@ -38,10 +34,11 @@ export default function SolanaConnectButton({
   onSelectWallet,
   onConnect,
   onDisconnect,
+  compactAddress,
 }: Props) {
   const [open, setOpen] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const shortAddress = formatWalletAddress(publicKey);
+  const shortAddress = formatWalletAddress(publicKey, compactAddress ? 1 : 4);
   const showWalletIcon = connected && Boolean(walletIcon);
   const label = !providerReady
     ? 'Connect Solana'
