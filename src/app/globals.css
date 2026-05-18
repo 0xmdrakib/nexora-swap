@@ -479,6 +479,15 @@ input:focus-visible {
   background: color-mix(in srgb, #ff6f63 18%, transparent);
 }
 
+.wallet-menu-walletconnect {
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.wallet-menu-walletconnect:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .wallet-menu-empty {
   padding: 12px;
   color: var(--muted);
@@ -1251,6 +1260,7 @@ input:focus-visible {
     flex: 1 1 0;
     min-width: 0;
     max-width: none;
+    padding-inline: 8px;
   }
 
   .wallet-stack {
@@ -1268,6 +1278,11 @@ input:focus-visible {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .wallet-provider-icon {
+    width: 15px;
+    height: 15px;
   }
 
   .swap-asset-card {
