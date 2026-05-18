@@ -288,24 +288,28 @@ export default function TokenSelect({
   }, [tokens, chainId]);
 
   const remainderTokens = useMemo(() => {
+    if (!open) return [];
     const seen = new Set<string>();
     for (const t of popularTokens) seen.add(tokenKey(t.chainId || chainId, t.address));
     for (const t of walletTokensNonZero) seen.add(tokenKey(t.chainId || chainId, t.address));
     return tokens.filter((t) => !seen.has(tokenKey(t.chainId || chainId, t.address)));
-  }, [tokens, popularTokens, walletTokensNonZero]);
+  }, [open, tokens, popularTokens, walletTokensNonZero, chainId]);
 
   const allTokensForSearch = useMemo(() => {
+    if (!open) return [];
     const merged: Token[] = [];
+    const seen = new Set<string>();
     const push = (t: Token) => {
       const key = tokenKey(t.chainId || chainId, t.address);
-      if (!key || merged.some((x) => tokenKey(x.chainId || chainId, x.address) === key)) return;
+      if (!key || seen.has(key)) return;
+      seen.add(key);
       merged.push(t);
     };
     popularTokens.forEach(push);
     walletTokensNonZero.forEach(push);
     tokens.forEach(push);
     return merged;
-  }, [popularTokens, walletTokensNonZero, tokens]);
+  }, [open, popularTokens, walletTokensNonZero, tokens, chainId]);
 
   const { balances: exactBalances } = useTokenBalances(
     walletAddress || undefined,
