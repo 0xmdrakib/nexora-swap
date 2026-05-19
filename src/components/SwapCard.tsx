@@ -1072,13 +1072,13 @@ export default function SwapCard() {
 
   return (
     <div className="swap-card">
-      <div className="swap-toolbar">
+      <div className={clsx('swap-toolbar', needsDualWallets ? 'swap-toolbar-dual-wallets' : 'swap-toolbar-single-wallet')}>
         <ChainSelect
           chainId={chainId}
           onSelect={selectSourceChain}
         />
 
-        <div className="wallet-stack">
+        <div className={clsx('wallet-stack', needsDualWallets ? 'wallet-stack-dual' : 'wallet-stack-single')}>
           {(fromChainIsEvm || needsDualWallets) && (
             <EvmConnectButton
               compactAddress={compactWalletLabels && needsDualWallets}
