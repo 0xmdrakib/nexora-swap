@@ -1287,6 +1287,11 @@ input:focus-visible {
     gap: 8px;
   }
 
+  .swap-toolbar-single-wallet {
+    grid-template-columns: minmax(0, max-content) auto;
+    justify-content: space-between;
+  }
+
   .swap-toolbar-dual-wallets {
     grid-template-columns: minmax(112px, 0.72fr) minmax(0, 1.28fr);
   }
@@ -1332,6 +1337,15 @@ input:focus-visible {
 
   .network-shell {
     width: 100%;
+  }
+
+  .swap-toolbar-single-wallet .network-shell {
+    width: fit-content;
+  }
+
+  .swap-toolbar-single-wallet .network-button {
+    width: auto;
+    max-width: min(178px, 44vw);
   }
 
   .network-button span,
