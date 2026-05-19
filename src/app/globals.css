@@ -393,7 +393,21 @@ input:focus-visible {
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.wallet-stack-single {
+  align-items: stretch;
+}
+
+.wallet-stack-dual {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: min(390px, 54vw);
 }
 
 .control-button,
@@ -412,7 +426,21 @@ input:focus-visible {
 }
 
 .wallet-button {
+  width: auto;
   max-width: min(210px, 48vw);
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.wallet-stack-dual .wallet-picker,
+.wallet-stack-dual .wallet-button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.wallet-stack-single .wallet-button {
+  max-width: min(236px, 56vw);
 }
 
 .wallet-picker {
@@ -1253,24 +1281,57 @@ input:focus-visible {
   }
 
   .swap-toolbar {
+    display: grid;
+    grid-template-columns: minmax(118px, 1fr) auto;
     align-items: stretch;
+    gap: 8px;
   }
 
-  .network-button,
+  .swap-toolbar-dual-wallets {
+    grid-template-columns: minmax(112px, 0.72fr) minmax(0, 1.28fr);
+  }
+
+  .network-button {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding-inline: 8px;
+  }
+
   .wallet-button {
-    flex: 1 1 0;
     min-width: 0;
     max-width: none;
     padding-inline: 8px;
   }
 
   .wallet-stack {
-    flex: 1 1 0;
-    justify-content: stretch;
+    width: auto;
+    justify-self: end;
+  }
+
+  .wallet-stack-single {
+    width: fit-content;
+  }
+
+  .wallet-stack-dual {
+    gap: 6px;
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .wallet-stack-dual .wallet-button {
+    width: 100%;
+    gap: 5px;
+    padding-inline: 6px;
+  }
+
+  .wallet-stack-single .wallet-button {
+    width: auto;
+    max-width: min(218px, 52vw);
   }
 
   .network-shell {
-    flex: 1 1 0;
+    width: 100%;
   }
 
   .network-button span,
