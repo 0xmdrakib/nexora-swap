@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
-import { Connection, VersionedTransaction } from '@solana/web3.js';
+import { VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
 
 export type SolanaWalletProvider = {
@@ -61,16 +61,6 @@ let standardWalletUnsubscribe: (() => void) | null = null;
 let standardWalletEventsAttached = false;
 let standardWalletAppReadyDispatched = false;
 let standardWallets: WalletStandardEntry[] = [];
-let connection: Connection | null = null;
-
-function getSolanaRpcUrl() {
-  return process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
-}
-
-function getConnection() {
-  if (!connection) connection = new Connection(getSolanaRpcUrl(), 'confirmed');
-  return connection;
-}
 
 function emit(next: Partial<SolanaWalletSnapshot>) {
   snapshot = { ...snapshot, ...next };
@@ -475,6 +465,29 @@ function base64ToBytes(base64: string) {
   return out;
 }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
+async function postSolanaApi<T>(path: string, body: Record<string, unknown>) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  if (!response.ok) {
+    const message = typeof payload?.error === 'string' ? payload.error : 'Solana request failed.';
+    throw new Error(message);
+  }
+  return payload as T;
+}
+
 async function connectWallet(walletName?: string) {
   initialize();
   const providers = candidateProviders();
@@ -531,10 +544,10 @@ async function sendBase64Transaction(base64: string) {
 
   if (provider.signTransaction) {
     const signed: VersionedTransaction = await provider.signTransaction(tx);
-    return getConnection().sendRawTransaction(signed.serialize(), {
-      skipPreflight: false,
-      maxRetries: 3,
+    const result = await postSolanaApi<{ signature: string }>('/api/solana/send-transaction', {
+      transaction: bytesToBase64(signed.serialize()),
     });
+    return result.signature;
   }
 
   if (provider.signAndSendTransaction) {
@@ -546,15 +559,8 @@ async function sendBase64Transaction(base64: string) {
 }
 
 async function confirmSignature(signature: string) {
-  const latest = await getConnection().getLatestBlockhash('confirmed');
-  await getConnection().confirmTransaction(
-    {
-      signature,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    'confirmed',
-  );
+  const result = await postSolanaApi<{ confirmed: boolean }>('/api/solana/confirm', { signature });
+  if (!result.confirmed) throw new Error('Solana transaction was not confirmed.');
 }
 
 export function useSolanaWallet() {
@@ -588,7 +594,6 @@ export function useSolanaWallet() {
       disconnect,
       sendBase64Transaction: send,
       confirmSignature: confirm,
-      connection: getConnection(),
     }),
     [state, selectWallet, connect, disconnect, send, confirm],
   );

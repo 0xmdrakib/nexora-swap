@@ -14,12 +14,9 @@ const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ
 const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
 export function getSolanaRpcUrl() {
-  return (
-    process.env.SOLANA_RPC_URL ||
-    process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-    process.env.ALCHEMY_SOLANA_RPC_URL ||
-    'https://api.mainnet-beta.solana.com'
-  );
+  const rpcUrl = process.env.SOLANA_RPC_URL?.trim();
+  if (!rpcUrl) throw new Error('Missing SOLANA_RPC_URL environment variable.');
+  return rpcUrl;
 }
 
 export function getSolanaConnection() {
