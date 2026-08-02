@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Wallet } from 'lucide-react';
+import { ChevronDown, LogOut, Wallet } from 'lucide-react';
 import clsx from 'clsx';
 
 import { formatWalletAddress } from '@/lib/format';
@@ -148,7 +148,8 @@ export default function SolanaConnectButton({
                 await onDisconnect();
               }}
             >
-              Disconnect
+              <LogOut size={16} aria-hidden="true" />
+              <span>Disconnect</span>
             </button>
           )}
         </div>

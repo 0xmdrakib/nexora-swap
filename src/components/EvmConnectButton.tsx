@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Wallet } from 'lucide-react';
+import { ChevronDown, LogOut, Wallet } from 'lucide-react';
 import clsx from 'clsx';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 
@@ -237,7 +237,8 @@ export default function EvmConnectButton({ onError, compactAddress }: Props) {
               className="wallet-menu-row wallet-menu-disconnect"
               onClick={disconnectWallet}
             >
-              Disconnect
+              <LogOut size={16} aria-hidden="true" />
+              <span>Disconnect</span>
             </button>
           )}
 
