@@ -2,7 +2,7 @@
 
 Nexora Swap is a multi-router DEX interface for fast, cleaner token swaps across major EVM chains and Solana.
 
-**Live app:** https://nexoraswap.online
+**Live app:** https://nexoraswap.rakibhq.xyz
 
 ---
 
@@ -69,41 +69,6 @@ The app focuses on keeping swap execution more transparent by showing route sele
 - @solana/web3.js
 - TanStack Query
 - Neon Postgres cache for token metadata and price lookups
-
----
-
-## Getting started
-
-### 1. Install dependencies
-
-```bash
-npm install
-```
-
-### 2. Configure environment variables
-
-Create a `.env` file in the project root. then fill all env from [.env.example](./.env.example).
-
-### Wallet setup note
-
-- EVM swaps use MetaMask or any WalletConnect-supported wallet.
-- Solana swaps use a Wallet Standard or injected Solana wallet such as Phantom, MetaMask, Bitget, Solflare, or Backpack.
-- Cross-chain flows can require both wallet types if the source and destination chains are different families.
-
-### 3. Run the development server
-
-```bash
-npm run dev
-```
-
-Open `http://localhost:3000` in your browser.
-
-### 4. Build for production
-
-```bash
-npm run build
-npm run start
-```
 
 ---
 
