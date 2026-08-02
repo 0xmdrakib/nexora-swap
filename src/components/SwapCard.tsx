@@ -26,6 +26,7 @@ import { useQuote } from '@/lib/hooks/useQuote';
 import { balanceKey, useMultiWalletTokenBalances } from '@/lib/hooks/useTokenBalances';
 import { tokenPriceKey, useTokenPrices } from '@/lib/hooks/useTokenPrices';
 import { useSolanaWallet } from '@/lib/hooks/useSolanaWallet';
+import { baseBuilderDataSuffixForChain } from '@/lib/baseBuilderCode';
 import {
   buildSwapPairPath,
   isNativeTokenAddress,
@@ -969,17 +970,19 @@ export default function SwapCard() {
       await ensureCorrectChain();
       const approveAmount = requiredAllowance;
       if (approveAmount <= 0n) return setUiError('Enter an amount to approve.');
+      const approvalChainId = fromToken.chainId || chainId;
       const hash = await writeContractAsync({
         abi: ERC20_ABI,
         address: fromToken.address as Address,
         functionName: 'approve',
         // Safer UX: approve only the exact amount entered (not unlimited).
         args: [spender as Address, approveAmount],
-        chainId: fromToken.chainId || chainId,
+        chainId: approvalChainId,
+        dataSuffix: baseBuilderDataSuffixForChain(approvalChainId),
       });
 
       // Keep the button in "Approving..." state until the tx is mined.
-      if (hash) setApproveTx({ hash, chainId: fromToken.chainId || chainId });
+      if (hash) setApproveTx({ hash, chainId: approvalChainId });
     } catch (e: any) {
       setUiError(e?.shortMessage || e?.message || 'Approve failed');
     }
@@ -1028,6 +1031,7 @@ export default function SwapCard() {
         to: quote.tx.to as Address,
         data: (quote.tx.data as any) || '0x',
         value: parseTxValue(quote.tx.value),
+        dataSuffix: baseBuilderDataSuffixForChain(quote.tx.chainId),
       });
       setLastTx({ hash, chainId: quote.tx.chainId, txType: 'evm' });
     } catch (e: any) {
