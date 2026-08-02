@@ -4,7 +4,32 @@ import Providers from './providers';
 
 export const metadata: Metadata = {
   title: 'Nexora Swap',
-  description: 'Nexora Swap - a multi router DEX.',
+  description:
+    'A fast, simple multi-router DEX for swapping tokens across EVM networks and Solana.',
+  metadataBase: new URL('https://nexoraswap.rakibhq.xyz'),
+  openGraph: {
+    title: 'Nexora Swap',
+    description:
+      'A fast, simple multi-router DEX for swapping tokens across EVM networks and Solana.',
+    url: 'https://nexoraswap.rakibhq.xyz',
+    siteName: 'Nexora Swap',
+    type: 'website',
+    images: [
+      {
+        url: '/nexora-swap-thumbnail.jpg',
+        width: 1910,
+        height: 1000,
+        alt: 'Nexora Swap — multi-router DEX',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Nexora Swap',
+    description:
+      'A fast, simple multi-router DEX for swapping tokens across EVM networks and Solana.',
+    images: ['/nexora-swap-thumbnail.jpg'],
+  },
   other: {
     'base:app_id': '6a5493c540f72197db8683c5',
   },
