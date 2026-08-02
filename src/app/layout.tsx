@@ -5,6 +5,9 @@ import Providers from './providers';
 export const metadata: Metadata = {
   title: 'Nexora Swap',
   description: 'Nexora Swap - a multi router DEX.',
+  other: {
+    'base:app_id': '6a5493c540f72197db8683c5',
+  },
 };
 
 
