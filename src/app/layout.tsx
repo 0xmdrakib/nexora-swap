@@ -52,7 +52,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
             <footer className="pt-2 pb-[calc(12px+env(safe-area-inset-bottom))]">
               <p className="footer-text text-center text-xs font-medium">
-                &copy; 2026 Md. Rakib - made with love and passion.
+                &copy; 2026 Md. Rakib • made with love and passion.
               </p>
             </footer>
           </div>
